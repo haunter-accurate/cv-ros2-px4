@@ -1,0 +1,3 @@
+[submodule "ros_ws/src/px4_ros_com"]
+	path = ros_ws/src/px4_ros_com
+	url = https://github.com/PX4/px4_ros_com.git
