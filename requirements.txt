@@ -1,0 +1,15 @@
+# OpenCV用于图像处理和摄像头捕获
+opencv-python>=4.6.0
+
+# NumPy用于数值计算
+numpy>=1.21.0
+
+# ROS2 Python客户端库
+rclpy>=3.0.0
+
+# 传感器消息转换工具
+cv_bridge>=3.0.0
+
+# ROS2标准消息类型
+sensor_msgs>=3.0.0
+std_msgs>=3.0.0
