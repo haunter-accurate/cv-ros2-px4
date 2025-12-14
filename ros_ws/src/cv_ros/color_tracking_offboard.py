@@ -8,12 +8,12 @@ from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand
 
 
 class ColorTrackingOffboard(Node):
-    """Node for controlling a vehicle in offboard mode to track colored objects."""
+    """在offboard模式下控制无人机跟踪彩色物体的节点。"""
 
     def __init__(self) -> None:
         super().__init__('color_tracking_offboard')
 
-        # Configure QoS profile for publishing and subscribing
+        # 配置发布和订阅的QoS配置文件
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
@@ -21,7 +21,7 @@ class ColorTrackingOffboard(Node):
             depth=1
         )
 
-        # Create publishers
+        # 创建发布者
         self.offboard_control_mode_publisher = self.create_publisher(
             OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile)
         self.trajectory_setpoint_publisher = self.create_publisher(
@@ -29,72 +29,72 @@ class ColorTrackingOffboard(Node):
         self.vehicle_command_publisher = self.create_publisher(
             VehicleCommand, '/fmu/in/vehicle_command', qos_profile)
 
-        # Create subscribers
+        # 创建订阅者
         self.vehicle_local_position_subscriber = self.create_subscription(
             VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         self.vehicle_status_subscriber = self.create_subscription(
             VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
         
-        # Subscribe to the red color detection topic
+        # 订阅红色物体检测话题
         self.color_detection_subscriber = self.create_subscription(
             Point, '/detection/red_center', self.color_detection_callback, qos_profile)
 
-        # Initialize variables
+        # 初始化变量
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_status = VehicleStatus()
-        self.color_center = Point()  # Latest detected color center (pixel coordinates)
+        self.color_center = Point()  # 最新检测到的颜色中心（像素坐标）
         
-        # Image parameters (assumed camera parameters)
-        self.image_width = 640.0  # pixels
-        self.image_height = 480.0  # pixels
+        # 图像参数（假设的摄像头参数）
+        self.image_width = 640.0  # 像素
+        self.image_height = 480.0  # 像素
         
-        # Control parameters
-        self.target_altitude = -5.0  # Target altitude in meters (negative because PX4 uses NED)
-        self.control_gain = 0.01  # Gain for converting pixel error to position offset
-        self.max_offset = 1.0  # Maximum allowed position offset in meters
+        # 控制参数
+        self.target_altitude = -5.0  # 目标高度（米，负数因为PX4使用NED坐标系）
+        self.control_gain = 0.01  # 将像素误差转换为位置偏移的增益
+        self.max_offset = 1.0  # 最大允许的位置偏移（米）
         
-        # Create a timer to publish control commands
+        # 创建定时器来发布控制命令
         self.timer = self.create_timer(0.1, self.timer_callback)
 
     def vehicle_local_position_callback(self, vehicle_local_position):
-        """Callback function for vehicle_local_position topic subscriber."""
+        """vehicle_local_position话题订阅者的回调函数。"""
         self.vehicle_local_position = vehicle_local_position
 
     def vehicle_status_callback(self, vehicle_status):
-        """Callback function for vehicle_status topic subscriber."""
+        """vehicle_status话题订阅者的回调函数。"""
         self.vehicle_status = vehicle_status
         
     def color_detection_callback(self, color_center):
-        """Callback function for color detection topic subscriber."""
+        """颜色检测话题订阅者的回调函数。"""
         self.color_center = color_center
-        self.get_logger().info(f"Received color center: ({color_center.x}, {color_center.y})")
+        self.get_logger().info(f"接收到颜色中心: ({color_center.x}, {color_center.y})")
 
     def arm(self):
-        """Send an arm command to the vehicle."""
+        """向无人机发送解锁命令。"""
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=1.0)
-        self.get_logger().info('Arm command sent')
+        self.get_logger().info('解锁命令已发送')
 
     def disarm(self):
-        """Send a disarm command to the vehicle."""
+        """向无人机发送锁定命令。"""
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, param1=0.0)
-        self.get_logger().info('Disarm command sent')
+        self.get_logger().info('锁定命令已发送')
 
     def engage_offboard_mode(self):
-        """Switch to offboard mode."""
+        """切换到offboard模式。"""
         self.publish_vehicle_command(
             VehicleCommand.VEHICLE_CMD_DO_SET_MODE, param1=1.0, param2=6.0)
-        self.get_logger().info("Switching to offboard mode")
+        self.get_logger().info("正在切换到offboard模式")
 
     def land(self):
-        """Switch to land mode."""
+        """切换到降落模式。"""
         self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_NAV_LAND)
-        self.get_logger().info("Switching to land mode")
+        self.get_logger().info("正在切换到降落模式")
 
     def publish_offboard_control_heartbeat_signal(self):
-        """Publish the offboard control mode."""
+        """发布offboard控制模式。"""
         msg = OffboardControlMode()
         msg.position = True
         msg.velocity = False
@@ -105,16 +105,16 @@ class ColorTrackingOffboard(Node):
         self.offboard_control_mode_publisher.publish(msg)
 
     def publish_position_setpoint(self, x: float, y: float, z: float):
-        """Publish the trajectory setpoint."""
+        """发布轨迹设定点。"""
         msg = TrajectorySetpoint()
         msg.position = [x, y, z]
-        msg.yaw = 1.57079  # (90 degree)
+        msg.yaw = 1.57079  # (90度)
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.trajectory_setpoint_publisher.publish(msg)
-        self.get_logger().info(f"Publishing position setpoints {[x, y, z]}")
+        self.get_logger().info(f"正在发布位置设定点 {[x, y, z]}")
 
     def publish_vehicle_command(self, command, **params) -> None:
-        """Publish a vehicle command."""
+        """发布无人机命令。"""
         msg = VehicleCommand()
         msg.command = command
         msg.param1 = params.get("param1", 0.0)
@@ -133,23 +133,23 @@ class ColorTrackingOffboard(Node):
         self.vehicle_command_publisher.publish(msg)
 
     def calculate_position_offset(self):
-        """Calculate position offset based on color center pixel coordinates."""
-        # Calculate pixel error from image center
+        """根据颜色中心像素坐标计算位置偏移。"""
+        # 计算图像中心的像素误差
         error_x = self.color_center.x - (self.image_width / 2)
         error_y = self.color_center.y - (self.image_height / 2)
         
-        # Convert pixel error to position offset
-        offset_x = -error_x * self.control_gain  # Negative because camera coordinate system
-        offset_y = -error_y * self.control_gain  # is flipped compared to body coordinate system
+        # 将像素误差转换为位置偏移
+        offset_x = -error_x * self.control_gain  # 负数是因为摄像头坐标系
+        offset_y = -error_y * self.control_gain  # 与机体坐标系相比是翻转的
         
-        # Limit the offset to maximum allowed value
+        # 将偏移限制在最大允许值内
         offset_x = max(min(offset_x, self.max_offset), -self.max_offset)
         offset_y = max(min(offset_y, self.max_offset), -self.max_offset)
         
         return offset_x, offset_y
 
     def timer_callback(self) -> None:
-        """Callback function for the timer."""
+        """定时器的回调函数。"""
         self.publish_offboard_control_heartbeat_signal()
 
         if self.offboard_setpoint_counter == 10:
@@ -157,28 +157,28 @@ class ColorTrackingOffboard(Node):
             self.arm()
 
         if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
-            # Calculate position offset based on detected color center
+            # 根据检测到的颜色中心计算位置偏移
             offset_x, offset_y = self.calculate_position_offset()
             
-            # Calculate target position (current position + offset)
+            # 计算目标位置（当前位置 + 偏移）
             target_x = self.vehicle_local_position.x + offset_x
             target_y = self.vehicle_local_position.y + offset_y
             target_z = self.target_altitude
             
-            # Publish the target position
+            # 发布目标位置
             self.publish_position_setpoint(target_x, target_y, target_z)
 
         if self.offboard_setpoint_counter < 11:
             self.offboard_setpoint_counter += 1
 
     def destroy_node(self):
-        """Clean up when node is destroyed."""
+        """节点销毁时的清理工作。"""
         self.disarm()
         super().destroy_node()
 
 
 def main(args=None) -> None:
-    print('Starting color tracking offboard control node...')
+    print('启动颜色跟踪offboard控制节点...')
     rclpy.init(args=args)
     color_tracking_offboard = ColorTrackingOffboard()
     rclpy.spin(color_tracking_offboard)
