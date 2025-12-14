@@ -15,9 +15,6 @@ ament_python_install_package(${PROJECT_NAME})
 # 安装Python脚本作为节点
 install(PROGRAMS
   cv_ros/red_color_detector_ros2.py
-  cv_ros/usb_camera_node.py
-  cv_ros/red_detector_downward.py
-  cv_ros/gps_position_controller.py
   cv_ros/color_tracking_offboard.py
   DESTINATION lib/${PROJECT_NAME}
 )

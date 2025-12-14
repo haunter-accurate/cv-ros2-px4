@@ -21,9 +21,6 @@ setup(
     entry_points={
         'console_scripts': [
             'red_color_detector_ros2 = cv_ros.red_color_detector_ros2:main',
-            'usb_camera_node = cv_ros.usb_camera_node:main',
-            'red_detector_downward = cv_ros.red_detector_downward:main',
-            'gps_position_controller = cv_ros.gps_position_controller:main',
             'color_tracking_offboard = cv_ros.color_tracking_offboard:main',
         ],
     },
