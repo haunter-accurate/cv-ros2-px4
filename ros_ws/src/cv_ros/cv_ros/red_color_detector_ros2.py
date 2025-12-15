@@ -14,11 +14,13 @@ class RedColorDetectorROS2(Node):
         self.declare_parameter('camera_id', 0)
         self.declare_parameter('publish_rate', 10.0)  # 最大发布频率（Hz）
         self.declare_parameter('min_area', 500)  # 最小色块面积阈值
+        self.declare_parameter('headless', False)  # 是否启用headless模式（无图像显示）
         
         # 获取参数
         camera_id = self.get_parameter('camera_id').value
         publish_rate = self.get_parameter('publish_rate').value
         self.min_area = self.get_parameter('min_area').value
+        self.headless = self.get_parameter('headless').value
         
         # 打开摄像头
         self.cap = cv2.VideoCapture(camera_id)
@@ -40,8 +42,12 @@ class RedColorDetectorROS2(Node):
         # 初始化中心点坐标
         self.last_center = None
         
-        self.get_logger().info(f'红色色块检测ROS2节点已启动 (发布频率: {publish_rate}Hz)')
-        self.get_logger().info('按 "q" 键退出程序')
+        if self.headless:
+            self.get_logger().info(f'红色色块检测ROS2节点已启动 (发布频率: {publish_rate}Hz, Headless模式: 启用)')
+            self.get_logger().info('按 Ctrl+C 退出程序')
+        else:
+            self.get_logger().info(f'红色色块检测ROS2节点已启动 (发布频率: {publish_rate}Hz, Headless模式: 禁用)')
+            self.get_logger().info('按 "q" 键退出程序')
 
     def timer_callback(self):
         # 读取一帧视频
@@ -125,9 +131,10 @@ class RedColorDetectorROS2(Node):
         cv2.line(frame, (0, frame_center_y), (self.frame_width, frame_center_y), (255, 255, 255), 1, cv2.LINE_AA)
         cv2.line(frame, (frame_center_x, 0), (frame_center_x, self.frame_height), (255, 255, 255), 1, cv2.LINE_AA)
         
-        # 显示结果
-        cv2.imshow('Red Color Detection', frame)
-        #cv2.imshow('Mask', mask)
+        # 仅在非headless模式下显示结果
+        if not self.headless:
+            cv2.imshow('Red Color Detection', frame)
+            #cv2.imshow('Mask', mask)
         
         # 发布中心点坐标
         if current_center is not None:
@@ -143,16 +150,18 @@ class RedColorDetectorROS2(Node):
             # 在控制台输出中心点坐标
             self.get_logger().info(f'最大红色色块中心点坐标: ({current_center[0]}, {current_center[1]})', throttle_duration_sec=1.0)
         
-        # 检查退出键
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        # 仅在非headless模式下检查退出键
+        if not self.headless and cv2.waitKey(1) & 0xFF == ord('q'):
             self.destroy_node()
             rclpy.shutdown()
 
     def __del__(self):
-        # 释放摄像头和关闭窗口
+        # 释放摄像头
         if hasattr(self, 'cap') and self.cap.isOpened():
             self.cap.release()
-        cv2.destroyAllWindows()
+        # 仅在非headless模式下关闭窗口
+        if not self.headless:
+            cv2.destroyAllWindows()
 
 
 def main(args=None):
