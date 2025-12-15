@@ -156,17 +156,17 @@ class ColorTrackingOffboard(Node):
             self.engage_offboard_mode()
             self.arm()
 
-        if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
-            # 根据检测到的颜色中心计算位置偏移
-            offset_x, offset_y = self.calculate_position_offset()
-            
-            # 计算目标位置（当前位置 + 偏移）
-            target_x = self.vehicle_local_position.x + offset_x
-            target_y = self.vehicle_local_position.y + offset_y
-            target_z = self.target_altitude
-            
-            # 发布目标位置
-            self.publish_position_setpoint(target_x, target_y, target_z)
+        # if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
+        # 根据检测到的颜色中心计算位置偏移
+        offset_x, offset_y = self.calculate_position_offset()
+        
+        # 计算目标位置（当前位置 + 偏移）
+        target_x = self.vehicle_local_position.x + offset_x
+        target_y = self.vehicle_local_position.y + offset_y
+        target_z = self.target_altitude
+        
+        # 发布目标位置
+        self.publish_position_setpoint(target_x, target_y, target_z)
 
         if self.offboard_setpoint_counter < 11:
             self.offboard_setpoint_counter += 1
