@@ -139,8 +139,16 @@ class ColorTrackingOffboard(Node):
         error_y = self.color_center.y - (self.image_height / 2)
         
         # 将像素误差转换为位置偏移
-        offset_x = -error_x * self.control_gain  # 负数是因为摄像头坐标系
-        offset_y = -error_y * self.control_gain  # 与机体坐标系相比是翻转的
+        # 摄像头朝向地面，方向对应关系：
+        # 图像X轴（水平）对应无人机Y轴（左右方向）
+        # 图像Y轴（垂直）对应无人机X轴（前后方向）
+        # PX4使用NED坐标系：x轴向前，y轴向右，z轴向下
+        
+        # 图像X轴到无人机Y轴：右侧误差 -> 向右移动（不需要反转）
+        offset_y = error_x * self.control_gain
+        
+        # 图像Y轴到无人机X轴：上方误差 -> 向前移动（需要反转，因为像素坐标系Y轴向下）
+        offset_x = -error_y * self.control_gain
         
         # 将偏移限制在最大允许值内
         offset_x = max(min(offset_x, self.max_offset), -self.max_offset)
