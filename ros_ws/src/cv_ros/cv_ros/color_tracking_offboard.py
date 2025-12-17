@@ -150,30 +150,52 @@ class ColorTrackingOffboard(Node):
 
     def timer_callback(self) -> None:
         """定时器的回调函数。"""
+        # 发布offboard控制模式心跳信号（无论是否在OFFBOARD模式）
         self.publish_offboard_control_heartbeat_signal()
 
-        if self.offboard_setpoint_counter == 10:
-            self.engage_offboard_mode()
-            self.arm()
+        # 记录当前系统状态和导航状态
+        if self.offboard_setpoint_counter % 10 == 0:
+            self.get_logger().info(f"系统状态: {self.vehicle_status.system_status}, 导航状态: {self.vehicle_status.nav_state}, 高度: {self.vehicle_local_position.z}")
 
-        # if self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD:
-        # 根据检测到的颜色中心计算位置偏移
-        offset_x, offset_y = self.calculate_position_offset()
+        # 检查是否处于OFFBOARD模式
+        is_offboard = hasattr(self.vehicle_status, 'nav_state') and \
+                     self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
         
-        # 计算目标位置（当前位置 + 偏移）
-        target_x = self.vehicle_local_position.x + offset_x
-        target_y = self.vehicle_local_position.y + offset_y
-        target_z = self.target_altitude
+        # 检查是否已经起飞（高度低于-0.5米，因为PX4使用NED坐标系）
+        is_flying = self.vehicle_local_position.z < -0.5
         
-        # 发布目标位置
-        self.publish_position_setpoint(target_x, target_y, target_z)
+        # 只有在OFFBOARD模式且已经起飞的情况下才发送目标位置
+        if is_offboard and is_flying:
+            # 计算位置偏移
+            offset_x, offset_y = self.calculate_position_offset()
+            
+            # 限制速度（通过限制每次位置更新的最大偏移量实现）
+            max_speed = 0.5  # 最大速度（米/秒）
+            update_interval = 0.1  # 定时器间隔（秒）
+            max_offset_per_update = max_speed * update_interval  # 每次更新的最大偏移量
+            
+            offset_x = max(min(offset_x, max_offset_per_update), -max_offset_per_update)
+            offset_y = max(min(offset_y, max_offset_per_update), -max_offset_per_update)
+            
+            # 计算目标位置
+            target_x = self.vehicle_local_position.x + offset_x
+            target_y = self.vehicle_local_position.y + offset_y
+            target_z = self.target_altitude
+            
+            # 发布目标位置
+            self.publish_position_setpoint(target_x, target_y, target_z)
+        elif is_offboard:
+            self.get_logger().info("处于OFFBOARD模式，但飞机尚未起飞")
+        else:
+            self.get_logger().info("未处于OFFBOARD模式，等待遥控器切换")
 
-        if self.offboard_setpoint_counter < 11:
+        # 更新计数器
+        if self.offboard_setpoint_counter < 100:
             self.offboard_setpoint_counter += 1
 
     def destroy_node(self):
         """节点销毁时的清理工作。"""
-        self.disarm()
+        # 不再自动锁定，由用户通过遥控器控制
         super().destroy_node()
 
 
