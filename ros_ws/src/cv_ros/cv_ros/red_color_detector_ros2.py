@@ -14,9 +14,9 @@ class RedColorDetectorROS2(Node):
         self.headless = True  # 默认启用headless模式
         
         # 参数配置
-        self.declare_parameter('camera_id', 0)
-        self.declare_parameter('publish_rate', 10.0)  # 最大发布频率（Hz）
-        self.declare_parameter('min_area', 500)  # 最小色块面积阈值
+        self.declare_parameter('camera_id', 0)  # 摄像头ID（整数）
+        self.declare_parameter('publish_rate', 10)  # 最大发布频率（Hz，整数）
+        self.declare_parameter('min_area', 500)  # 最小色块面积阈值（整数）
         self.declare_parameter('headless', False)  # 是否启用headless模式（无图像显示）
         
         # 获取参数
