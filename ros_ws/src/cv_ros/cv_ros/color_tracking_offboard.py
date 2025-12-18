@@ -263,9 +263,11 @@ class ColorTrackingOffboard(Node):
         # 发布offboard控制模式心跳信号（无论是否在OFFBOARD模式）
         self.publish_offboard_control_heartbeat_signal()
 
-        # 记录当前系统状态和导航状态
+        # 记录当前导航状态和高度
         if self.offboard_setpoint_counter % 10 == 0:
-            self.get_logger().info(f"系统状态: {self.vehicle_status.system_status}, 导航状态: {self.vehicle_status.nav_state}, 高度: {self.vehicle_local_position.z}")
+            nav_state = self.vehicle_status.nav_state if hasattr(self.vehicle_status, 'nav_state') else "未知"
+            altitude = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "未知"
+            self.get_logger().info(f"导航状态: {nav_state}, 高度: {altitude}")
 
         # 检查是否处于OFFBOARD模式
         is_offboard = hasattr(self.vehicle_status, 'nav_state') and \

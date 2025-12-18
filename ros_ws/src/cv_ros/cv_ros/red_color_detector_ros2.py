@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from geometry_msgs.msg import Point
 
 
@@ -42,8 +43,16 @@ class RedColorDetectorROS2(Node):
         self.actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.get_logger().info(f'摄像头配置: 分辨率={self.frame_width}x{self.frame_height}, 目标帧率={self.actual_fps}Hz')
         
+        # 配置QoS配置文件，与color_tracking_offboard节点保持一致
+        qos_profile = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        
         # 创建发布者
-        self.center_pub = self.create_publisher(Point, '/detection/red_center', 10)
+        self.center_pub = self.create_publisher(Point, '/detection/red_center', qos_profile)
         
         # 创建定时器（控制发布频率）
         timer_period = 1.0 / publish_rate
