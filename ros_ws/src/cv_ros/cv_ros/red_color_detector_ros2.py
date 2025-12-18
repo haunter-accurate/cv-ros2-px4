@@ -10,6 +10,9 @@ class RedColorDetectorROS2(Node):
     def __init__(self):
         super().__init__('red_color_detector_ros2')
         
+        # 初始化所有可能在__del__中使用的属性
+        self.headless = True  # 默认启用headless模式
+        
         # 参数配置
         self.declare_parameter('camera_id', 0)
         self.declare_parameter('publish_rate', 10.0)  # 最大发布频率（Hz）
@@ -18,7 +21,7 @@ class RedColorDetectorROS2(Node):
         
         # 获取参数
         camera_id = self.get_parameter('camera_id').value
-        publish_rate = self.get_parameter('publish_rate').value
+        publish_rate = float(self.get_parameter('publish_rate').value)  # 显式转换为浮点数
         self.min_area = self.get_parameter('min_area').value
         self.headless = self.get_parameter('headless').value
         
@@ -178,7 +181,7 @@ class RedColorDetectorROS2(Node):
         if hasattr(self, 'cap') and self.cap.isOpened():
             self.cap.release()
         # 仅在非headless模式下关闭窗口
-        if not self.headless:
+        if hasattr(self, 'headless') and not self.headless:
             cv2.destroyAllWindows()
 
 
