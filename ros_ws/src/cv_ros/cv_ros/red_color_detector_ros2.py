@@ -28,9 +28,16 @@ class RedColorDetectorROS2(Node):
             self.get_logger().error(f'无法打开摄像头 {camera_id}')
             return
         
+        # 设置摄像头参数以提高帧率
+        self.cap.set(cv2.CAP_PROP_FPS, 30)  # 设置摄像头帧率为30Hz
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)  # 降低分辨率以提高帧率
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)  # 降低分辨率以提高帧率
+        
         # 读取摄像头参数
         self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
+        self.get_logger().info(f'摄像头配置: 分辨率={self.frame_width}x{self.frame_height}, 目标帧率={self.actual_fps}Hz')
         
         # 创建发布者
         self.center_pub = self.create_publisher(Point, '/detection/red_center', 10)
@@ -38,6 +45,10 @@ class RedColorDetectorROS2(Node):
         # 创建定时器（控制发布频率）
         timer_period = 1.0 / publish_rate
         self.timer = self.create_timer(timer_period, self.timer_callback)
+        
+        # 发布频率统计
+        self.publish_count = 0
+        self.start_time = self.get_clock().now().to_msg().sec
         
         # 初始化中心点坐标
         self.last_center = None
@@ -147,8 +158,15 @@ class RedColorDetectorROS2(Node):
             # 更新最后检测到的中心点
             self.last_center = current_center
             
-            # 在控制台输出中心点坐标
-            self.get_logger().info(f'最大红色色块中心点坐标: ({current_center[0]}, {current_center[1]})', throttle_duration_sec=1.0)
+            # 更新发布计数
+            self.publish_count += 1
+            
+            # 每10次发布输出一次日志和发布速率
+            if self.publish_count % 10 == 0:
+                current_time = self.get_clock().now().to_msg().sec
+                if current_time > self.start_time:
+                    actual_rate = self.publish_count / (current_time - self.start_time)
+                    self.get_logger().info(f'最大红色色块中心点坐标: ({current_center[0]}, {current_center[1]}), 实际发布速率: {actual_rate:.2f}Hz')
         
         # 仅在非headless模式下检查退出键
         if not self.headless and cv2.waitKey(1) & 0xFF == ord('q'):
