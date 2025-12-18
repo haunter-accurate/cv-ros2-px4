@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from geometry_msgs.msg import Point
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
+from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus, VehicleAttitude
 
 
 class ColorTrackingOffboard(Node):
@@ -34,6 +34,8 @@ class ColorTrackingOffboard(Node):
             VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         self.vehicle_status_subscriber = self.create_subscription(
             VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
+        self.vehicle_attitude_subscriber = self.create_subscription(
+            VehicleAttitude, '/fmu/out/vehicle_attitude', self.vehicle_attitude_callback, qos_profile)
         
         # 订阅红色物体检测话题
         self.color_detection_subscriber = self.create_subscription(
@@ -43,6 +45,7 @@ class ColorTrackingOffboard(Node):
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_status = VehicleStatus()
+        self.vehicle_attitude = VehicleAttitude()  # 无人机姿态信息
         self.color_center = Point()  # 最新检测到的颜色中心（像素坐标）
         
         # 图像参数（假设的摄像头参数）
@@ -54,6 +57,20 @@ class ColorTrackingOffboard(Node):
         self.control_gain = 0.01  # 将像素误差转换为位置偏移的增益
         self.max_offset = 1.0  # 最大允许的位置偏移（米）
         
+        # 解耦参数（参考匿名飞控）
+        self.pixel_per_degree_x = 2.4  # 每度对应的像素数（X轴）
+        self.pixel_per_degree_y = 2.4  # 每度对应的像素数（Y轴）
+        self.cmp_pixel_x = 0.01  # 每像素对应的地面距离（米）
+        self.cmp_pixel_y = 0.01  # 每像素对应的地面距离（米）
+        self.lpf_alpha = 0.2  # 低通滤波系数
+        
+        # 解耦变量
+        self.decou_pos_pixel = [0.0, 0.0]  # 解耦后的像素偏移
+        self.decou_pos_pixel_lpf = [[0.0, 0.0], [0.0, 0.0]]  # 两级低通滤波
+        self.target_loss = 0  # 目标丢失标志
+        self.target_loss_hold_time = 0  # 目标丢失保持时间
+        self.tlh_time = 100  # 目标丢失超时时间（10秒，因为定时器间隔0.1秒）
+        
         # 创建定时器来发布控制命令
         self.timer = self.create_timer(0.1, self.timer_callback)
 
@@ -64,6 +81,10 @@ class ColorTrackingOffboard(Node):
     def vehicle_status_callback(self, vehicle_status):
         """vehicle_status话题订阅者的回调函数。"""
         self.vehicle_status = vehicle_status
+        
+    def vehicle_attitude_callback(self, vehicle_attitude):
+        """vehicle_attitude话题订阅者的回调函数。"""
+        self.vehicle_attitude = vehicle_attitude
         
     def color_detection_callback(self, color_center):
         """颜色检测话题订阅者的回调函数。"""
@@ -132,23 +153,104 @@ class ColorTrackingOffboard(Node):
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.vehicle_command_publisher.publish(msg)
 
-    def calculate_position_offset(self):
-        """根据颜色中心像素坐标计算位置偏移。"""
-        # 计算图像中心的像素误差
+    def quaternion_to_euler(self, x, y, z, w):
+        """将四元数转换为欧拉角（滚转、俯仰、偏航）"""
+        import math
+        
+        t0 = +2.0 * (w * x + y * z)
+        t1 = +1.0 - 2.0 * (x * x + y * y)
+        roll = math.atan2(t0, t1)
+        
+        t2 = +2.0 * (w * y - z * x)
+        t2 = +1.0 if t2 > +1.0 else t2
+        t2 = -1.0 if t2 < -1.0 else t2
+        pitch = math.asin(t2)
+        
+        t3 = +2.0 * (w * z + x * y)
+        t4 = +1.0 - 2.0 * (y * y + z * z)
+        yaw = math.atan2(t3, t4)
+        
+        return roll, pitch, yaw
+        
+    def decouple_vision_data(self):
+        """实现解耦算法，参考匿名飞控的ANO_CBTracking_Decoupling函数"""
+        import math
+        
+        # 检查是否检测到目标
+        if hasattr(self.color_center, 'x') and hasattr(self.color_center, 'y'):
+            self.target_loss = 0
+            self.target_loss_hold_time = 0
+        else:
+            # 目标丢失，增加保持时间
+            if self.target_loss_hold_time < self.tlh_time:
+                self.target_loss_hold_time += 1
+            else:
+                self.target_loss = 1
+        
+        # 获取图像像素误差
         error_x = self.color_center.x - (self.image_width / 2)
         error_y = self.color_center.y - (self.image_height / 2)
         
-        # 将像素误差转换为位置偏移
-        # 摄像头朝向地面，方向对应关系：
+        # 摄像头朝向地面，方向对应关系
         # 图像X轴（水平）对应无人机Y轴（左右方向）
         # 图像Y轴（垂直）对应无人机X轴（前后方向）
-        # PX4使用NED坐标系：x轴向前，y轴向右，z轴向下
+        opmv_pos_x = -error_y  # 图像Y轴误差对应无人机X轴（需要反转）
+        opmv_pos_y = error_x   # 图像X轴误差对应无人机Y轴
         
-        # 图像X轴到无人机Y轴：右侧误差 -> 向右移动（不需要反转）
-        offset_y = error_x * self.control_gain
+        # 获取无人机姿态（四元数转换为欧拉角）
+        if hasattr(self.vehicle_attitude, 'q'):
+            roll, pitch, yaw = self.quaternion_to_euler(
+                self.vehicle_attitude.q[0], 
+                self.vehicle_attitude.q[1], 
+                self.vehicle_attitude.q[2], 
+                self.vehicle_attitude.q[3]
+            )
+            
+            # 将弧度转换为角度
+            roll_deg = math.degrees(roll)
+            pitch_deg = math.degrees(pitch)
+            
+            # 计算姿态引起的像素偏移
+            rp2pixel_val_x = -self.pixel_per_degree_x * pitch_deg
+            rp2pixel_val_y = -self.pixel_per_degree_y * roll_deg
+        else:
+            rp2pixel_val_x = 0.0
+            rp2pixel_val_y = 0.0
         
-        # 图像Y轴到无人机X轴：上方误差 -> 向前移动（需要反转，因为像素坐标系Y轴向下）
-        offset_x = -error_y * self.control_gain
+        # 应用姿态补偿
+        corrected_pos_x = opmv_pos_x - rp2pixel_val_x
+        corrected_pos_y = opmv_pos_y - rp2pixel_val_y
+        
+        if not self.target_loss:
+            # 应用两级低通滤波
+            self.decou_pos_pixel_lpf[0][0] += self.lpf_alpha * (corrected_pos_x - self.decou_pos_pixel_lpf[0][0])
+            self.decou_pos_pixel_lpf[0][1] += self.lpf_alpha * (corrected_pos_y - self.decou_pos_pixel_lpf[0][1])
+            
+            self.decou_pos_pixel_lpf[1][0] += self.lpf_alpha * (self.decou_pos_pixel_lpf[0][0] - self.decou_pos_pixel_lpf[1][0])
+            self.decou_pos_pixel_lpf[1][1] += self.lpf_alpha * (self.decou_pos_pixel_lpf[0][1] - self.decou_pos_pixel_lpf[1][1])
+            
+            self.decou_pos_pixel[0] = self.decou_pos_pixel_lpf[1][0]
+            self.decou_pos_pixel[1] = self.decou_pos_pixel_lpf[1][1]
+        else:
+            # 目标丢失，应用低通滤波归零
+            self.decou_pos_pixel[0] += self.lpf_alpha * (0.0 - self.decou_pos_pixel[0])
+            self.decou_pos_pixel[1] += self.lpf_alpha * (0.0 - self.decou_pos_pixel[1])
+        
+    def calculate_position_offset(self):
+        """根据解耦后的像素偏移计算位置偏移。"""
+        # 先执行解耦算法
+        self.decouple_vision_data()
+        
+        # 获取当前高度（绝对值，米）
+        current_height = abs(self.vehicle_local_position.z) if hasattr(self.vehicle_local_position, 'z') else 1.0
+        
+        # 根据高度调整每像素对应的地面距离
+        cmp_pixel_x = self.cmp_pixel_x * current_height
+        cmp_pixel_y = self.cmp_pixel_y * current_height
+        
+        # 将解耦后的像素偏移转换为位置偏移
+        offset_x = self.decou_pos_pixel[0] * cmp_pixel_x
+        offset_y = self.decou_pos_pixel[1] * cmp_pixel_y
         
         # 将偏移限制在最大允许值内
         offset_x = max(min(offset_x, self.max_offset), -self.max_offset)
