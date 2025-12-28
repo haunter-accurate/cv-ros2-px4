@@ -23,6 +23,7 @@ setup(
         'console_scripts': [
             'red_color_detector_ros2 = cv_ros.red_color_detector_ros2:main',
             'color_tracking_offboard = cv_ros.color_tracking_offboard:main',
+            'offboard_forward_1m = cv_ros.offboard_forward_1m:main',
         ],
     },
 )
