@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import VehicleStatus
+from px4_msgs.msg import VehicleControlMode, VehicleLocalPosition
 
 
 class FlightModeMonitor(Node):
@@ -19,22 +19,43 @@ class FlightModeMonitor(Node):
             depth=1
         )
 
-        self.vehicle_status_subscriber = self.create_subscription(
-            VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
+        self.vehicle_control_mode_subscriber = self.create_subscription(
+            VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
+        
+        self.vehicle_local_position_subscriber = self.create_subscription(
+            VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
 
-        self.vehicle_status = VehicleStatus()
+        self.vehicle_control_mode = VehicleControlMode()
+        self.vehicle_local_position = VehicleLocalPosition()
 
         self.timer = self.create_timer(1.0, self.timer_callback)
 
-    def vehicle_status_callback(self, vehicle_status):
-        self.vehicle_status = vehicle_status
+    def vehicle_control_mode_callback(self, vehicle_control_mode):
+        self.vehicle_control_mode = vehicle_control_mode
+
+    def vehicle_local_position_callback(self, vehicle_local_position):
+        self.vehicle_local_position = vehicle_local_position
 
     def timer_callback(self) -> None:
-        if hasattr(self.vehicle_status, 'nav_state'):
-            nav_state = self.vehicle_status.nav_state
-            self.get_logger().info(f"当前飞行模式: {nav_state}")
+        if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled'):
+            is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled
+            is_armed = self.vehicle_control_mode.flag_armed
+            
+            mode_info = []
+            if is_armed:
+                mode_info.append("已解锁")
+            else:
+                mode_info.append("未解锁")
+            
+            if is_offboard:
+                mode_info.append("OFFBOARD模式")
+            else:
+                mode_info.append("非OFFBOARD模式")
+            
+            self.get_logger().info(f"当前状态: {', '.join(mode_info)}")
         else:
-            self.get_logger().info("等待飞行状态数据...")
+            self.get_logger().info("等待飞行控制模式数据...")
+
 
 
 def main(args=None) -> None:

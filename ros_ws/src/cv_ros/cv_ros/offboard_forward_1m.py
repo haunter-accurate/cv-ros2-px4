@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleStatus
+from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleControlMode
 
 
 class OffboardForward1m(Node):
@@ -31,13 +31,13 @@ class OffboardForward1m(Node):
         # 创建订阅者
         self.vehicle_local_position_subscriber = self.create_subscription(
             VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
-        self.vehicle_status_subscriber = self.create_subscription(
-            VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
+        self.vehicle_control_mode_subscriber = self.create_subscription(
+            VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
 
         # 初始化变量
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
-        self.vehicle_status = VehicleStatus()
+        self.vehicle_control_mode = VehicleControlMode()
         self.has_sent_forward_command = False  # 标记是否已经计算了目标位置
         self.offboard_entry_time = None  # 记录进入offboard模式的时间
         self.offboard_mode_maintained = False  # 标记offboard模式是否已经维持了2秒
@@ -57,9 +57,9 @@ class OffboardForward1m(Node):
         """vehicle_local_position话题订阅者的回调函数。"""
         self.vehicle_local_position = vehicle_local_position
 
-    def vehicle_status_callback(self, vehicle_status):
-        """vehicle_status话题订阅者的回调函数。"""
-        self.vehicle_status = vehicle_status
+    def vehicle_control_mode_callback(self, vehicle_control_mode):
+        """vehicle_control_mode话题订阅者的回调函数。"""
+        self.vehicle_control_mode = vehicle_control_mode
 
     def arm(self):
         """向无人机发送解锁命令。"""
@@ -131,15 +131,15 @@ class OffboardForward1m(Node):
         # 发布offboard控制模式心跳信号（无论是否在OFFBOARD模式）
         self.publish_offboard_control_heartbeat_signal()
 
-        # 记录当前导航状态和高度
+        # 记录当前控制模式和高度
         if self.offboard_setpoint_counter % 10 == 0:
-            nav_state = self.vehicle_status.nav_state if hasattr(self.vehicle_status, 'nav_state') else "未知"
+            is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') else False
             altitude = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "未知"
-            self.get_logger().info(f"导航状态: {nav_state}, 高度: {altitude}")
+            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 高度: {altitude}")
 
         # 检查是否处于OFFBOARD模式
-        is_offboard = hasattr(self.vehicle_status, 'nav_state') and \
-                     self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
+        is_offboard = hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') and \
+                     self.vehicle_control_mode.flag_control_offboard_enabled
         
         # 检查是否已经起飞（高度低于-0.5米，因为PX4使用NED坐标系）
         is_flying = self.vehicle_local_position.z < -0.5
