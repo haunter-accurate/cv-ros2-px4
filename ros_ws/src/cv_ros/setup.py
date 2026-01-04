@@ -25,6 +25,7 @@ setup(
             'color_tracking_offboard = cv_ros.color_tracking_offboard:main',
             'offboard_forward_1m = cv_ros.offboard_forward_1m:main',
             'flight_mode_monitor = cv_ros.flight_mode_monitor:main',
+            'px4_connection_diagnostics = cv_ros.px4_connection_diagnostics:main',
         ],
     },
 )
