@@ -39,6 +39,8 @@ class OffboardForward1m(Node):
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_status = VehicleStatus()
         self.has_sent_forward_command = False  # 标记是否已经计算了目标位置
+        self.offboard_entry_time = None  # 记录进入offboard模式的时间
+        self.offboard_mode_maintained = False  # 标记offboard模式是否已经维持了2秒
         self.target_x = 0.0
         self.target_y = 0.0
         self.target_z = 0.0
@@ -46,6 +48,7 @@ class OffboardForward1m(Node):
         # 控制参数
         self.target_altitude = -5.0  # 目标高度（米，负数因为PX4使用NED坐标系）
         self.forward_distance = 1.0  # 向前前进的距离（米）
+        self.offboard_maintain_time = 2.0  # offboard模式需要维持的时间（秒）
 
         # 创建定时器来发布控制命令
         self.timer = self.create_timer(0.1, self.timer_callback)
@@ -141,8 +144,30 @@ class OffboardForward1m(Node):
         # 检查是否已经起飞（高度低于-0.5米，因为PX4使用NED坐标系）
         is_flying = self.vehicle_local_position.z < -0.5
         
-        # 只有在OFFBOARD模式且已经起飞的情况下才发送目标位置
-        if is_offboard and is_flying:
+        # 处理offboard模式计时逻辑
+        if is_offboard:
+            # 如果刚刚进入offboard模式，记录当前时间
+            if self.offboard_entry_time is None:
+                self.offboard_entry_time = self.get_clock().now()
+                self.get_logger().info("已进入offboard模式，开始计时")
+            else:
+                # 计算已经在offboard模式的时间
+                current_time = self.get_clock().now()
+                elapsed_time = (current_time - self.offboard_entry_time).nanoseconds / 1e9  # 转换为秒
+                
+                # 检查是否已经维持了足够的时间
+                if elapsed_time >= self.offboard_maintain_time and not self.offboard_mode_maintained:
+                    self.offboard_mode_maintained = True
+                    self.get_logger().info(f"offboard模式已维持 {self.offboard_maintain_time} 秒，准备执行前进命令")
+        else:
+            # 退出offboard模式，重置计时
+            if self.offboard_entry_time is not None:
+                self.offboard_entry_time = None
+                self.offboard_mode_maintained = False
+                self.get_logger().info("已退出offboard模式，重置计时")
+        
+        # 只有在OFFBOARD模式维持2秒且已经起飞的情况下才发送目标位置
+        if self.offboard_mode_maintained and is_flying:
             # 只计算一次向前1米的目标位置
             if not self.has_sent_forward_command:
                 # 计算目标位置（当前位置向前1米，在NED坐标系中X轴是向前的）
