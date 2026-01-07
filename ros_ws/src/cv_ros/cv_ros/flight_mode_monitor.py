@@ -4,7 +4,7 @@ import rclpy
 import math
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import VehicleControlMode, VehicleLocalPosition
+from px4_msgs.msg import VehicleControlMode, VehicleLocalPosition, VehicleAttitude
 
 
 class FlightModeMonitor(Node):
@@ -25,9 +25,13 @@ class FlightModeMonitor(Node):
         
         self.vehicle_local_position_subscriber = self.create_subscription(
             VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
+        
+        self.vehicle_attitude_subscriber = self.create_subscription(
+            VehicleAttitude, '/fmu/out/vehicle_attitude', self.vehicle_attitude_callback, qos_profile)
 
         self.vehicle_control_mode = VehicleControlMode()
         self.vehicle_local_position = VehicleLocalPosition()
+        self.vehicle_attitude = VehicleAttitude()
 
         self.timer = self.create_timer(1.0, self.timer_callback)
 
@@ -36,6 +40,9 @@ class FlightModeMonitor(Node):
 
     def vehicle_local_position_callback(self, vehicle_local_position):
         self.vehicle_local_position = vehicle_local_position
+
+    def vehicle_attitude_callback(self, vehicle_attitude):
+        self.vehicle_attitude = vehicle_attitude
 
     def quaternion_to_euler(self, q):
         """将四元数转换为欧拉角（滚转、俯仰、偏航）"""
@@ -63,7 +70,12 @@ class FlightModeMonitor(Node):
             
             self.get_logger().info(f"当前状态: {', '.join(mode_info)}")
             # 输出姿态角信息
-            if hasattr(self.vehicle_local_position, 'x_ang'):
+            if hasattr(self.vehicle_attitude, 'q'):
+                # 从VehicleAttitude话题获取四元数并转换为欧拉角
+                q = self.vehicle_attitude.q
+                roll, pitch, yaw = self.quaternion_to_euler(q)
+                self.get_logger().info(f"姿态角 (从VehicleAttitude): 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
+            elif hasattr(self.vehicle_local_position, 'x_ang'):
                 roll = self.vehicle_local_position.x_ang
                 pitch = self.vehicle_local_position.y_ang
                 yaw = self.vehicle_local_position.z_ang
@@ -77,8 +89,14 @@ class FlightModeMonitor(Node):
                 # 检查是否有其他姿态相关属性
                 if hasattr(self.vehicle_local_position, 'heading'):
                     self.get_logger().info(f"偏航角: {self.vehicle_local_position.heading:.2f}")
-                else:
-                    self.get_logger().info("未找到姿态角数据")
+                
+                # 尝试其他可能的姿态字段名称
+                if hasattr(self.vehicle_local_position, 'roll'):
+                    self.get_logger().info(f"滚转: {self.vehicle_local_position.roll:.2f}")
+                if hasattr(self.vehicle_local_position, 'pitch'):
+                    self.get_logger().info(f"俯仰: {self.vehicle_local_position.pitch:.2f}")
+                if hasattr(self.vehicle_local_position, 'yaw'):
+                    self.get_logger().info(f"偏航: {self.vehicle_local_position.yaw:.2f}")
         else:
             self.get_logger().info("等待飞行控制模式数据...")
 
