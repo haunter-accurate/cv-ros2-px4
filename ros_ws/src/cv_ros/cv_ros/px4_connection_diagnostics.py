@@ -91,6 +91,7 @@ class PX4ConnectionDiagnostics(Node):
         
         if self.position_received:
             self.get_logger().info(f"位置: X={self.vehicle_local_position.x:.2f}, Y={self.vehicle_local_position.y:.2f}, Z={self.vehicle_local_position.z:.2f}")
+            self.get_logger().info(f"姿态角: 滚转={self.vehicle_local_position.x_ang:.2f}, 俯仰={self.vehicle_local_position.y_ang:.2f}, 偏航={self.vehicle_local_position.z_ang:.2f}")
         
         # 诊断建议
         self.get_logger().info("=" * 60)

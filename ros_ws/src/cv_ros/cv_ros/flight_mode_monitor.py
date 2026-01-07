@@ -53,6 +53,11 @@ class FlightModeMonitor(Node):
                 mode_info.append("非OFFBOARD模式")
             
             self.get_logger().info(f"当前状态: {', '.join(mode_info)}")
+            # 输出姿态角信息
+            roll = getattr(self.vehicle_local_position, 'x_ang', 0.0)
+            pitch = getattr(self.vehicle_local_position, 'y_ang', 0.0)
+            yaw = getattr(self.vehicle_local_position, 'z_ang', 0.0)
+            self.get_logger().info(f"姿态角: 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
         else:
             self.get_logger().info("等待飞行控制模式数据...")
 
