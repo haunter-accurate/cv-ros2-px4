@@ -33,6 +33,8 @@ class FlightModeMonitor(Node):
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_attitude = VehicleAttitude()
 
+        self.attitude_received = False
+
         self.timer = self.create_timer(1.0, self.timer_callback)
 
     def vehicle_control_mode_callback(self, vehicle_control_mode):
@@ -43,6 +45,11 @@ class FlightModeMonitor(Node):
 
     def vehicle_attitude_callback(self, vehicle_attitude):
         self.vehicle_attitude = vehicle_attitude
+        self.attitude_received = True
+        
+        if self.attitude_received and not hasattr(self, 'first_attitude_received'):
+            self.first_attitude_received = True
+            self.get_logger().info("✓ VehicleAttitude话题已连接")
 
     def quaternion_to_euler(self, q):
         """将四元数转换为欧拉角（滚转、俯仰、偏航）"""
@@ -70,33 +77,64 @@ class FlightModeMonitor(Node):
             
             self.get_logger().info(f"当前状态: {', '.join(mode_info)}")
             # 输出姿态角信息
-            if hasattr(self.vehicle_attitude, 'q'):
-                # 从VehicleAttitude话题获取四元数并转换为欧拉角
-                q = self.vehicle_attitude.q
-                roll, pitch, yaw = self.quaternion_to_euler(q)
-                self.get_logger().info(f"姿态角 (从VehicleAttitude): 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
-            elif hasattr(self.vehicle_local_position, 'x_ang'):
-                roll = self.vehicle_local_position.x_ang
-                pitch = self.vehicle_local_position.y_ang
-                yaw = self.vehicle_local_position.z_ang
-                self.get_logger().info(f"姿态角: 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
-            elif hasattr(self.vehicle_local_position, 'q'):
-                # 从四元数转换为欧拉角
-                q = self.vehicle_local_position.q
-                roll, pitch, yaw = self.quaternion_to_euler(q)
-                self.get_logger().info(f"姿态角 (从四元数转换): 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
+            attitude_available = False
+            
+            # 1. 尝试从VehicleAttitude话题获取姿态信息
+            if self.attitude_received:
+                if hasattr(self.vehicle_attitude, 'q'):
+                    # 从VehicleAttitude话题获取四元数并转换为欧拉角
+                    q = self.vehicle_attitude.q
+                    roll, pitch, yaw = self.quaternion_to_euler(q)
+                    self.get_logger().info(f"姿态角 (从VehicleAttitude): 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
+                    # 打印四元数以调试
+                    if not hasattr(self, 'quaternion_logged'):
+                        self.quaternion_logged = True
+                        self.get_logger().info(f"四元数: {q}")
+                    # 每5秒打印一次四元数，以便持续监控
+                    if hasattr(self, 'last_quaternion_log_time'):
+                        current_time = self.get_clock().now().nanoseconds / 1e9
+                        if current_time - self.last_quaternion_log_time > 5.0:
+                            self.get_logger().info(f"四元数: {q}")
+                            self.last_quaternion_log_time = current_time
+                    else:
+                        self.last_quaternion_log_time = self.get_clock().now().nanoseconds / 1e9
+                    # 检查四元数是否全为0
+                    if all(abs(val) < 1e-6 for val in q):
+                        self.get_logger().warning("警告: 四元数全为0!")
+                    attitude_available = True
+                else:
+                    # 打印所有属性以调试
+                    attributes = [attr for attr in dir(self.vehicle_attitude) if not attr.startswith('_') and not callable(getattr(self.vehicle_attitude, attr))]
+                    self.get_logger().info(f"VehicleAttitude属性: {attributes[:15]}...")
             else:
-                # 检查是否有其他姿态相关属性
-                if hasattr(self.vehicle_local_position, 'heading'):
-                    self.get_logger().info(f"偏航角: {self.vehicle_local_position.heading:.2f}")
-                
-                # 尝试其他可能的姿态字段名称
-                if hasattr(self.vehicle_local_position, 'roll'):
-                    self.get_logger().info(f"滚转: {self.vehicle_local_position.roll:.2f}")
-                if hasattr(self.vehicle_local_position, 'pitch'):
-                    self.get_logger().info(f"俯仰: {self.vehicle_local_position.pitch:.2f}")
-                if hasattr(self.vehicle_local_position, 'yaw'):
-                    self.get_logger().info(f"偏航: {self.vehicle_local_position.yaw:.2f}")
+                self.get_logger().info("等待VehicleAttitude话题数据...")
+            
+            # 2. 如果VehicleAttitude不可用，尝试从VehicleLocalPosition获取姿态信息
+            if not attitude_available:
+                if hasattr(self.vehicle_local_position, 'x_ang'):
+                    roll = self.vehicle_local_position.x_ang
+                    pitch = self.vehicle_local_position.y_ang
+                    yaw = self.vehicle_local_position.z_ang
+                    self.get_logger().info(f"姿态角: 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
+                    attitude_available = True
+                elif hasattr(self.vehicle_local_position, 'q'):
+                    # 从四元数转换为欧拉角
+                    q = self.vehicle_local_position.q
+                    roll, pitch, yaw = self.quaternion_to_euler(q)
+                    self.get_logger().info(f"姿态角 (从四元数转换): 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
+                    attitude_available = True
+                else:
+                    # 检查是否有其他姿态相关属性
+                    if hasattr(self.vehicle_local_position, 'heading'):
+                        self.get_logger().info(f"偏航角: {self.vehicle_local_position.heading:.2f}")
+                    
+                    # 尝试其他可能的姿态字段名称
+                    if hasattr(self.vehicle_local_position, 'roll'):
+                        self.get_logger().info(f"滚转: {self.vehicle_local_position.roll:.2f}")
+                    if hasattr(self.vehicle_local_position, 'pitch'):
+                        self.get_logger().info(f"俯仰: {self.vehicle_local_position.pitch:.2f}")
+                    if hasattr(self.vehicle_local_position, 'yaw'):
+                        self.get_logger().info(f"偏航: {self.vehicle_local_position.yaw:.2f}")
         else:
             self.get_logger().info("等待飞行控制模式数据...")
 
