@@ -4,7 +4,7 @@ import rclpy
 import math
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import VehicleStatus, VehicleLocalPosition, VehicleCommandAck, VehicleAttitude
+from px4_msgs.msg import VehicleStatus, VehicleLocalPosition, VehicleCommandAck, VehicleAttitude, VehicleControlMode
 
 
 class PX4ConnectionDiagnostics(Node):
@@ -29,13 +29,18 @@ class PX4ConnectionDiagnostics(Node):
         self.vehicle_attitude_subscriber = self.create_subscription(
             VehicleAttitude, '/fmu/out/vehicle_attitude', self.vehicle_attitude_callback, qos_profile)
         
+        self.vehicle_control_mode_subscriber = self.create_subscription(
+            VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
+        
         self.vehicle_status = VehicleStatus()
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_attitude = VehicleAttitude()
+        self.vehicle_control_mode = VehicleControlMode()
         
         self.status_received = False
         self.position_received = False
         self.attitude_received = False
+        self.control_mode_received = False
         
         self.timer = self.create_timer(2.0, self.timer_callback)
         self.start_time = self.get_clock().now()
@@ -69,6 +74,15 @@ class PX4ConnectionDiagnostics(Node):
             elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
             self.get_logger().info(f"✓ VehicleAttitude话题已连接 (耗时: {elapsed:.2f}秒)")
 
+    def vehicle_control_mode_callback(self, vehicle_control_mode):
+        self.control_mode_received = True
+        self.vehicle_control_mode = vehicle_control_mode
+        
+        if self.control_mode_received and not hasattr(self, 'first_control_mode_received'):
+            self.first_control_mode_received = True
+            elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
+            self.get_logger().info(f"✓ VehicleControlMode话题已连接 (耗时: {elapsed:.2f}秒)")
+
     def quaternion_to_euler(self, q):
         """将四元数转换为欧拉角（滚转、俯仰、偏航）"""
         w, x, y, z = q
@@ -88,6 +102,7 @@ class PX4ConnectionDiagnostics(Node):
         self.get_logger().info(f"VehicleStatus话题: {'✓ 已连接' if self.status_received else '✗ 未连接'}")
         self.get_logger().info(f"VehicleLocalPosition话题: {'✓ 已连接' if self.position_received else '✗ 未连接'}")
         self.get_logger().info(f"VehicleAttitude话题: {'✓ 已连接' if self.attitude_received else '✗ 未连接'}")
+        self.get_logger().info(f"VehicleControlMode话题: {'✓ 已连接' if self.control_mode_received else '✗ 未连接'}")
         
         # 显示详细状态信息
         if self.status_received:
@@ -112,6 +127,25 @@ class PX4ConnectionDiagnostics(Node):
                 self.get_logger().info("  ✓ nav_state=6 表示OFFBOARD模式")
             else:
                 self.get_logger().warn(f"  ? nav_state={nav_state} (未知状态)")
+        
+        # 从VehicleControlMode获取更详细的飞行模式信息
+        if self.control_mode_received:
+            if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled'):
+                is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled
+                is_armed = self.vehicle_control_mode.flag_armed
+                
+                mode_info = []
+                if is_armed:
+                    mode_info.append("已解锁")
+                else:
+                    mode_info.append("未解锁")
+                
+                if is_offboard:
+                    mode_info.append("OFFBOARD模式")
+                else:
+                    mode_info.append("非OFFBOARD模式")
+                
+                self.get_logger().info(f"当前状态: {', '.join(mode_info)}")
         
         if self.position_received:
             self.get_logger().info(f"位置: X={self.vehicle_local_position.x:.2f}, Y={self.vehicle_local_position.y:.2f}, Z={self.vehicle_local_position.z:.2f}")
@@ -138,7 +172,7 @@ class PX4ConnectionDiagnostics(Node):
         self.get_logger().info("=" * 60)
         self.get_logger().info("诊断建议:")
         
-        if not self.status_received and not self.position_received and not self.attitude_received:
+        if not self.status_received and not self.position_received and not self.attitude_received and not self.control_mode_received:
             self.get_logger().error("✗ 所有话题都未连接！")
             self.get_logger().error("  请检查:")
             self.get_logger().error("  1. Micro XRCE-DDS Agent是否正在运行")
@@ -151,6 +185,9 @@ class PX4ConnectionDiagnostics(Node):
         elif not self.attitude_received:
             self.get_logger().warn("⚠ VehicleAttitude话题未连接")
             self.get_logger().warn("  可能原因: PX4飞控姿态估计系统未初始化或通信问题")
+        elif not self.control_mode_received:
+            self.get_logger().warn("⚠ VehicleControlMode话题未连接")
+            self.get_logger().warn("  可能原因: PX4飞控控制模式系统未初始化或通信问题")
         elif self.vehicle_status.nav_state == 0:
             self.get_logger().warn("⚠ 导航状态为0，可能原因:")
             self.get_logger().warn("  1. PX4飞控尚未完成初始化")
