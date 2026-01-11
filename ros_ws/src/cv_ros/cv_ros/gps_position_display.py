@@ -170,8 +170,13 @@ class GpsPositionDisplay(Node):
             self.get_logger().warn("⚠ VehicleGlobalPosition话题未连接")
             self.get_logger().warn("  可能原因: 位置估计器尚未初始化或GPS信号不足")
         elif not self.sensor_gps_received:
-            self.get_logger().warn("⚠ SensorGps话题未连接")
-            self.get_logger().warn("  可能原因: GPS模块未正确连接或未上电")
+            # 检查VehicleGlobalPosition是否有效
+            if hasattr(self.vehicle_global_position, 'lat_lon_valid') and self.vehicle_global_position.lat_lon_valid:
+                self.get_logger().info("✓ 虽然SensorGps话题未连接，但VehicleGlobalPosition提供了有效的GPS坐标")
+                self.get_logger().info("  这是正常的，因为VehicleGlobalPosition包含了融合后的位置信息")
+            else:
+                self.get_logger().warn("⚠ SensorGps话题未连接")
+                self.get_logger().warn("  可能原因: GPS模块未正确连接或未上电")
         elif self.sensor_gps_received:
             # 检查GPS定位类型
             fix_type = self.sensor_gps.fix_type
