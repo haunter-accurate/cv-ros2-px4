@@ -86,21 +86,11 @@ class FlightModeMonitor(Node):
                     q = self.vehicle_attitude.q
                     roll, pitch, yaw = self.quaternion_to_euler(q)
                     self.get_logger().info(f"姿态角 (从VehicleAttitude): 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
-                    # 打印四元数以调试
-                    if not hasattr(self, 'quaternion_logged'):
-                        self.quaternion_logged = True
-                        self.get_logger().info(f"四元数: {q}")
-                    # 每5秒打印一次四元数，以便持续监控
-                    if hasattr(self, 'last_quaternion_log_time'):
-                        current_time = self.get_clock().now().nanoseconds / 1e9
-                        if current_time - self.last_quaternion_log_time > 5.0:
-                            self.get_logger().info(f"四元数: {q}")
-                            self.last_quaternion_log_time = current_time
-                    else:
-                        self.last_quaternion_log_time = self.get_clock().now().nanoseconds / 1e9
-                    # 检查四元数是否全为0
+
+                    # 检查四元数是否全为0（保留基本验证）
                     if all(abs(val) < 1e-6 for val in q):
                         self.get_logger().warning("警告: 四元数全为0!")
+
                     attitude_available = True
                 else:
                     # 打印所有属性以调试

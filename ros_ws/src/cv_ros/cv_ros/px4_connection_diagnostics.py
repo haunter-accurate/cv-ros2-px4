@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import rclpy
+import math
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import VehicleStatus, VehicleLocalPosition, VehicleCommandAck
+from px4_msgs.msg import VehicleStatus, VehicleLocalPosition, VehicleCommandAck, VehicleAttitude
 
 
 class PX4ConnectionDiagnostics(Node):
@@ -25,11 +26,16 @@ class PX4ConnectionDiagnostics(Node):
         self.vehicle_local_position_subscriber = self.create_subscription(
             VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         
+        self.vehicle_attitude_subscriber = self.create_subscription(
+            VehicleAttitude, '/fmu/out/vehicle_attitude', self.vehicle_attitude_callback, qos_profile)
+        
         self.vehicle_status = VehicleStatus()
         self.vehicle_local_position = VehicleLocalPosition()
+        self.vehicle_attitude = VehicleAttitude()
         
         self.status_received = False
         self.position_received = False
+        self.attitude_received = False
         
         self.timer = self.create_timer(2.0, self.timer_callback)
         self.start_time = self.get_clock().now()
@@ -54,6 +60,23 @@ class PX4ConnectionDiagnostics(Node):
             elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
             self.get_logger().info(f"✓ VehicleLocalPosition话题已连接 (耗时: {elapsed:.2f}秒)")
 
+    def vehicle_attitude_callback(self, vehicle_attitude):
+        self.attitude_received = True
+        self.vehicle_attitude = vehicle_attitude
+        
+        if self.attitude_received and not hasattr(self, 'first_attitude_received'):
+            self.first_attitude_received = True
+            elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
+            self.get_logger().info(f"✓ VehicleAttitude话题已连接 (耗时: {elapsed:.2f}秒)")
+
+    def quaternion_to_euler(self, q):
+        """将四元数转换为欧拉角（滚转、俯仰、偏航）"""
+        w, x, y, z = q
+        roll = math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
+        pitch = math.asin(2 * (w * y - z * x))
+        yaw = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+        return roll, pitch, yaw
+
     def timer_callback(self) -> None:
         elapsed = (self.get_clock().now() - self.start_time).nanoseconds / 1e9
         
@@ -64,6 +87,7 @@ class PX4ConnectionDiagnostics(Node):
         # 检查话题连接状态
         self.get_logger().info(f"VehicleStatus话题: {'✓ 已连接' if self.status_received else '✗ 未连接'}")
         self.get_logger().info(f"VehicleLocalPosition话题: {'✓ 已连接' if self.position_received else '✗ 未连接'}")
+        self.get_logger().info(f"VehicleAttitude话题: {'✓ 已连接' if self.attitude_received else '✗ 未连接'}")
         
         # 显示详细状态信息
         if self.status_received:
@@ -91,13 +115,30 @@ class PX4ConnectionDiagnostics(Node):
         
         if self.position_received:
             self.get_logger().info(f"位置: X={self.vehicle_local_position.x:.2f}, Y={self.vehicle_local_position.y:.2f}, Z={self.vehicle_local_position.z:.2f}")
-            self.get_logger().info(f"姿态角: 滚转={self.vehicle_local_position.x_ang:.2f}, 俯仰={self.vehicle_local_position.y_ang:.2f}, 偏航={self.vehicle_local_position.z_ang:.2f}")
+        
+        # 显示姿态角信息
+        attitude_available = False
+        if self.attitude_received and hasattr(self.vehicle_attitude, 'q'):
+            q = self.vehicle_attitude.q
+            # 检查四元数是否全为0
+            if not all(abs(val) < 1e-6 for val in q):
+                roll, pitch, yaw = self.quaternion_to_euler(q)
+                self.get_logger().info(f"姿态角 (从VehicleAttitude): 滚转={roll:.2f}, 俯仰={pitch:.2f}, 偏航={yaw:.2f}")
+                attitude_available = True
+            else:
+                self.get_logger().warn("  ⚠ VehicleAttitude四元数全为0")
+        
+        if not attitude_available and self.position_received:
+            if hasattr(self.vehicle_local_position, 'x_ang'):
+                self.get_logger().info(f"姿态角 (从VehicleLocalPosition): 滚转={self.vehicle_local_position.x_ang:.2f}, 俯仰={self.vehicle_local_position.y_ang:.2f}, 偏航={self.vehicle_local_position.z_ang:.2f}")
+            elif hasattr(self.vehicle_local_position, 'heading'):
+                self.get_logger().info(f"偏航角 (从VehicleLocalPosition): {self.vehicle_local_position.heading:.2f}")
         
         # 诊断建议
         self.get_logger().info("=" * 60)
         self.get_logger().info("诊断建议:")
         
-        if not self.status_received and not self.position_received:
+        if not self.status_received and not self.position_received and not self.attitude_received:
             self.get_logger().error("✗ 所有话题都未连接！")
             self.get_logger().error("  请检查:")
             self.get_logger().error("  1. Micro XRCE-DDS Agent是否正在运行")
@@ -107,6 +148,9 @@ class PX4ConnectionDiagnostics(Node):
         elif not self.status_received:
             self.get_logger().warn("⚠ VehicleStatus话题未连接")
             self.get_logger().warn("  可能原因: PX4飞控未正确启动或通信配置错误")
+        elif not self.attitude_received:
+            self.get_logger().warn("⚠ VehicleAttitude话题未连接")
+            self.get_logger().warn("  可能原因: PX4飞控姿态估计系统未初始化或通信问题")
         elif self.vehicle_status.nav_state == 0:
             self.get_logger().warn("⚠ 导航状态为0，可能原因:")
             self.get_logger().warn("  1. PX4飞控尚未完成初始化")
