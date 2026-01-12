@@ -44,11 +44,17 @@ class OffboardForward1m(Node):
         self.target_x = 0.0
         self.target_y = 0.0
         self.target_z = 0.0
+        self.task_completed = False  # 标记任务是否完成
+        self.task_start_time = None  # 记录任务开始时间
+        self.task_completion_time = None  # 记录任务完成时间
         
         # 控制参数
         self.target_altitude = -5.0  # 目标高度（米，负数因为PX4使用NED坐标系）
         self.forward_distance = 1.0  # 向前前进的距离（米）
         self.offboard_maintain_time = 2.0  # offboard模式需要维持的时间（秒）
+        self.position_tolerance = 0.1  # 位置误差容忍度（米）
+        self.hover_time_after_completion = 3.0  # 任务完成后悬停的时间（秒）
+        self.completion_time_start = None  # 记录开始悬停的时间
 
         # 创建定时器来发布控制命令
         self.timer = self.create_timer(0.1, self.timer_callback)
@@ -176,8 +182,51 @@ class OffboardForward1m(Node):
                 self.target_z = self.target_altitude
                 
                 self.has_sent_forward_command = True  # 标记已经计算了目标位置
+                self.task_start_time = self.get_clock().now()  # 记录任务开始时间
                 self.get_logger().info(f"已设置向前1米的目标位置: X={self.target_x}, Y={self.target_y}, Z={self.target_z}")
             
+            # 检查是否到达目标位置
+            if not self.task_completed and hasattr(self.vehicle_local_position, 'x'):
+                # 计算当前位置与目标位置的距离
+                distance_to_target = ((self.vehicle_local_position.x - self.target_x) ** 2 +
+                                     (self.vehicle_local_position.y - self.target_y) ** 2 +
+                                     (self.vehicle_local_position.z - self.target_z) ** 2) ** 0.5
+                
+                # 检查是否在位置误差容忍度内
+                if distance_to_target < self.position_tolerance:
+                    self.task_completed = True
+                    self.task_completion_time = self.get_clock().now()
+                    self.completion_time_start = self.get_clock().now()
+                    
+                    # 计算任务完成时间
+                    if self.task_start_time:
+                        task_duration = (self.task_completion_time - self.task_start_time).nanoseconds / 1e9
+                        self.get_logger().info(f"✅ 任务完成！已成功前进1米到达目标位置")
+                        self.get_logger().info(f"   目标位置: X={self.target_x:.2f}, Y={self.target_y:.2f}, Z={self.target_z:.2f}")
+                        self.get_logger().info(f"   当前位置: X={self.vehicle_local_position.x:.2f}, Y={self.vehicle_local_position.y:.2f}, Z={self.vehicle_local_position.z:.2f}")
+                        self.get_logger().info(f"   完成时间: {task_duration:.2f}秒")
+                        self.get_logger().info(f"   将在目标位置悬停 {self.hover_time_after_completion} 秒")
+                    else:
+                        self.get_logger().info(f"✅ 任务完成！已成功前进1米到达目标位置")
+                        self.get_logger().info(f"   目标位置: X={self.target_x:.2f}, Y={self.target_y:.2f}, Z={self.target_z:.2f}")
+                        self.get_logger().info(f"   当前位置: X={self.vehicle_local_position.x:.2f}, Y={self.vehicle_local_position.y:.2f}, Z={self.vehicle_local_position.z:.2f}")
+                        self.get_logger().info(f"   将在目标位置悬停 {self.hover_time_after_completion} 秒")
+            
+            # 检查悬停时间
+            if self.task_completed and self.completion_time_start:
+                hover_elapsed = (self.get_clock().now() - self.completion_time_start).nanoseconds / 1e9
+                if hover_elapsed < self.hover_time_after_completion:
+                    # 继续悬停
+                    remaining_hover_time = self.hover_time_after_completion - hover_elapsed
+                    if int(remaining_hover_time * 10) % 10 == 0:  # 每0.1秒更新一次
+                        self.get_logger().info(f"任务已完成，正在悬停... 剩余时间: {remaining_hover_time:.1f}秒")
+                else:
+                    # 悬停时间结束
+                    if not hasattr(self, 'hover_completed'):
+                        self.hover_completed = True
+                        self.get_logger().info(f"✅ 悬停时间已结束，任务流程全部完成！")
+                        self.get_logger().info(f"   总任务时间: {(self.get_clock().now() - self.task_start_time).nanoseconds / 1e9:.2f}秒")
+        
             # 持续发布目标位置，确保无人机保持在目标位置
             self.publish_position_setpoint(self.target_x, self.target_y, self.target_z)
         elif is_offboard:
