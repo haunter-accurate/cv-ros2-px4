@@ -235,8 +235,8 @@ class OffboardNorth1m(Node):
         is_offboard = hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') and \
                      self.vehicle_control_mode.flag_control_offboard_enabled
         
-        # 检查是否已经起飞（高度低于-0.5米，因为PX4使用NED坐标系）
-        is_flying = self.vehicle_local_position.z < -0.5
+        # 检查是否已经起飞（高度大于0.1米，根据实际高度值表示方式调整）
+        is_flying = self.vehicle_local_position.z > 0.1
         
         # 处理offboard模式计时逻辑
         if is_offboard:
