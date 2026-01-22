@@ -41,7 +41,7 @@ class OffboardForward1m(Node):
         self.declare_parameter('offboard_maintain_time', 2.0)  # offboard模式需要维持的时间（秒）
         self.declare_parameter('position_tolerance', 0.1)  # 位置误差容忍度（米）
         self.declare_parameter('hover_time_after_completion', 3.0)  # 任务完成后悬停的时间（秒）
-        self.declare_parameter('max_vertical_speed', 0.2)  # 最大垂直速度（米/秒）
+        self.declare_parameter('max_vertical_speed', 0.3)  # 最大垂直速度（米/秒）
         self.declare_parameter('max_horizontal_speed', 0.5)  # 最大水平速度（米/秒）
         
         # 获取参数
@@ -266,7 +266,7 @@ class OffboardForward1m(Node):
                 # 计算目标位置（当前位置向前1米，在NED坐标系中X轴是向前的）
                 self.target_x = self.vehicle_local_position.x + self.forward_distance
                 self.target_y = self.vehicle_local_position.y
-                self.target_z = self.target_altitude
+                self.target_z = self.vehicle_local_position.z
                 
                 self.has_sent_forward_command = True  # 标记已经计算了目标位置
                 self.task_start_time = self.get_clock().now()  # 记录任务开始时间
