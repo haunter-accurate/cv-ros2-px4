@@ -24,6 +24,7 @@ setup(
             'red_color_detector_ros2 = cv_ros.red_color_detector_ros2:main',
             'color_tracking_offboard = cv_ros.color_tracking_offboard:main',
             'offboard_forward_1m = cv_ros.offboard_forward_1m:main',
+            'offboard_north_1m = cv_ros.offboard_north_1m:main',
             'flight_mode_monitor = cv_ros.flight_mode_monitor:main',
             'px4_connection_diagnostics = cv_ros.px4_connection_diagnostics:main',
             'gps_position_display = cv_ros.gps_position_display:main',
