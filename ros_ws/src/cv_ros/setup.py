@@ -28,6 +28,9 @@ setup(
             'flight_mode_monitor = cv_ros.flight_mode_monitor:main',
             'px4_connection_diagnostics = cv_ros.px4_connection_diagnostics:main',
             'gps_position_display = cv_ros.gps_position_display:main',
+            'rc_channels_monitor = cv_ros.rc_channels_monitor:main',
+            'gps_offboard_publisher = cv_ros.gps_offboard_publisher:main',
+            'gps_coordinate_receiver = cv_ros.gps_coordinate_receiver:main',
         ],
     },
 )
