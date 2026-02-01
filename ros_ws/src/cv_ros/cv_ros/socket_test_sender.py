@@ -26,7 +26,7 @@ def main():
     
     # 解析命令行参数
     parser = argparse.ArgumentParser(description='Socket Test Sender')
-    parser.add_argument('--target-ip', type=str, default='localhost', help='目标IP地址')
+    parser.add_argument('--target-ip', type=str, default='10.5.190.48', help='目标IP地址')
     parser.add_argument('--target-port', type=int, default=5000, help='目标端口')
     parser.add_argument('--test-message', type=str, default='Hello from PX4 Drone!', help='测试消息')
     parser.add_argument('--send-interval', type=float, default=2.0, help='发送间隔（秒）')

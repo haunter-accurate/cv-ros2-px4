@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
+import math
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleControlMode
+from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleControlMode, VehicleGlobalPosition
 
 
 class OffboardNorth1m(Node):
@@ -33,6 +34,8 @@ class OffboardNorth1m(Node):
             VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         self.vehicle_control_mode_subscriber = self.create_subscription(
             VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
+        self.vehicle_global_position_subscriber = self.create_subscription(
+            VehicleGlobalPosition, '/fmu/out/vehicle_global_position', self.vehicle_global_position_callback, qos_profile)
 
         # 参数配置
         self.declare_parameter('headless', False)  # 是否启用headless模式（无详细日志）
@@ -58,6 +61,7 @@ class OffboardNorth1m(Node):
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_control_mode = VehicleControlMode()
+        self.vehicle_global_position = VehicleGlobalPosition()
         self.has_sent_north_command = False  # 标记是否已经计算了目标位置
         self.offboard_entry_time = None  # 记录进入offboard模式的时间
         self.offboard_mode_maintained = False  # 标记offboard模式是否已经维持了2秒
@@ -70,6 +74,9 @@ class OffboardNorth1m(Node):
         self.completion_time_start = None  # 记录开始悬停的时间
         self.last_position = None  # 记录上次位置
         self.last_position_time = None  # 记录上次位置时间
+        self.gps_origin_lat = None  # GPS原点纬度
+        self.gps_origin_lon = None  # GPS原点经度
+        self.gps_origin_alt = None  # GPS原点高度
         
         # 输出初始化信息
         if not self.headless:
@@ -86,6 +93,57 @@ class OffboardNorth1m(Node):
     def vehicle_control_mode_callback(self, vehicle_control_mode):
         """vehicle_control_mode话题订阅者的回调函数。"""
         self.vehicle_control_mode = vehicle_control_mode
+
+    def vehicle_global_position_callback(self, vehicle_global_position):
+        """vehicle_global_position话题订阅者的回调函数。"""
+        self.vehicle_global_position = vehicle_global_position
+        # 记录GPS原点（第一次接收到GPS数据时）
+        if self.gps_origin_lat is None:
+            self.gps_origin_lat = vehicle_global_position.lat
+            self.gps_origin_lon = vehicle_global_position.lon
+            self.gps_origin_alt = vehicle_global_position.alt
+            if not self.headless:
+                self.get_logger().info(f"已记录GPS原点: lat={self.gps_origin_lat:.8f}, lon={self.gps_origin_lon:.8f}, alt={self.gps_origin_alt:.2f}")
+
+    def gps_to_ned(self, lat, lon, alt):
+        """将GPS坐标转换为NED坐标（相对于GPS原点）。"""
+        if self.gps_origin_lat is None or self.gps_origin_lon is None:
+            return 0.0, 0.0, 0.0
+        
+        # 地球半径（米）
+        R = 6378137.0
+        
+        # 计算北向距离（NED坐标系中X轴）
+        delta_lat = lat - self.gps_origin_lat
+        north = R * delta_lat
+        
+        # 计算东向距离（NED坐标系中Y轴）
+        delta_lon = lon - self.gps_origin_lon
+        east = R * math.cos(math.radians(lat)) * delta_lon
+        
+        # 计算向下距离（NED坐标系中Z轴，注意高度方向相反）
+        down = -(alt - self.gps_origin_alt)
+        
+        return north, east, down
+
+    def ned_to_gps(self, north, east, down):
+        """将NED坐标转换为GPS坐标（相对于GPS原点）。"""
+        if self.gps_origin_lat is None or self.gps_origin_lon is None:
+            return self.gps_origin_lat, self.gps_origin_lon, self.gps_origin_alt
+        
+        # 地球半径（米）
+        R = 6378137.0
+        
+        # 计算纬度
+        lat = self.gps_origin_lat + north / R
+        
+        # 计算经度
+        lon = self.gps_origin_lon + east / (R * math.cos(math.radians(lat)))
+        
+        # 计算高度
+        alt = self.gps_origin_alt - down
+        
+        return lat, lon, alt
 
     def arm(self):
         """向无人机发送解锁命令。"""
@@ -267,16 +325,46 @@ class OffboardNorth1m(Node):
         if self.offboard_mode_maintained and is_flying:
             # 只计算一次向正北1米的目标位置
             if not self.has_sent_north_command:
-                # 计算目标位置（当前位置向正北1米，在NED坐标系中X轴是向北的）
-                self.target_x = self.vehicle_local_position.x + self.north_distance
-                self.target_y = self.vehicle_local_position.y
-                # 使用当前高度，而不是固定目标高度，避免急剧的高度变化
-                self.target_z = self.vehicle_local_position.z
-                
-                self.has_sent_north_command = True  # 标记已经计算了目标位置
-                self.task_start_time = self.get_clock().now()  # 记录任务开始时间
-                if not self.headless:
-                    self.get_logger().info(f"已设置向正北1米的目标位置: X={self.target_x}, Y={self.target_y}, Z={self.target_z}")
+                # 使用GPS坐标计算目标位置
+                if hasattr(self.vehicle_global_position, 'lat') and self.gps_origin_lat is not None:
+                    # 获取当前GPS坐标
+                    current_lat = self.vehicle_global_position.lat
+                    current_lon = self.vehicle_global_position.lon
+                    current_alt = self.vehicle_global_position.alt
+                    
+                    # 计算目标GPS坐标（向正北1米）
+                    # 地球半径（米）
+                    R = 6378137.0
+                    # 向北移动1米对应的纬度变化
+                    delta_lat = self.north_distance / R
+                    target_lat = current_lat + delta_lat
+                    target_lon = current_lon  # 经度不变
+                    target_alt = current_alt  # 高度不变
+                    
+                    # 将目标GPS坐标转换为NED坐标
+                    self.target_x, self.target_y, self.target_z = self.gps_to_ned(target_lat, target_lon, target_alt)
+                    
+                    self.has_sent_north_command = True  # 标记已经计算了目标位置
+                    self.task_start_time = self.get_clock().now()  # 记录任务开始时间
+                    if not self.headless:
+                        self.get_logger().info(f"使用GPS坐标计算目标位置:")
+                        self.get_logger().info(f"   当前GPS: lat={current_lat:.8f}, lon={current_lon:.8f}, alt={current_alt:.2f}")
+                        self.get_logger().info(f"   目标GPS: lat={target_lat:.8f}, lon={target_lon:.8f}, alt={target_alt:.2f}")
+                        self.get_logger().info(f"   目标NED: X={self.target_x:.2f}, Y={self.target_y:.2f}, Z={self.target_z:.2f}")
+                else:
+                    # GPS数据不可用，使用局部坐标作为后备方案
+                    if not self.headless:
+                        self.get_logger().warn("GPS数据不可用，使用局部坐标计算目标位置")
+                    # 计算目标位置（当前位置向正北1米，在NED坐标系中X轴是向北的）
+                    self.target_x = self.vehicle_local_position.x + self.north_distance
+                    self.target_y = self.vehicle_local_position.y
+                    # 使用当前高度，而不是固定目标高度，避免急剧的高度变化
+                    self.target_z = self.vehicle_local_position.z
+                    
+                    self.has_sent_north_command = True  # 标记已经计算了目标位置
+                    self.task_start_time = self.get_clock().now()  # 记录任务开始时间
+                    if not self.headless:
+                        self.get_logger().info(f"使用局部坐标计算目标位置: X={self.target_x}, Y={self.target_y}, Z={self.target_z}")
             
             # 检查是否到达目标位置
             if not self.task_completed and hasattr(self.vehicle_local_position, 'x'):
