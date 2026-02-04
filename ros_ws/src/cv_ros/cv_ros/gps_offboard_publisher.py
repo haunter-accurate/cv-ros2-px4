@@ -43,16 +43,17 @@ class GpsOffboardPublisher(Node):
         # 初始化变量
         self.vehicle_control_mode = VehicleControlMode()
         self.vehicle_global_position = VehicleGlobalPosition()
-        self.offboard_entry_time = None  # 记录进入offboard模式的时间
-        self.gps_published = False  # 标记是否已经发布了GPS坐标
-        self.offboard_mode_detected = False  # 标记是否检测到offboard模式
+        self.last_published_time = None  # 记录最后发布GPS坐标的时间
+        self.publish_interval = 5.0  # GPS坐标发布间隔（秒）
+        self.gps_position_received = False  # 标记是否接收到GPS位置数据
         
         # 输出初始化信息
         if not self.headless:
             self.get_logger().info("GPS Offboard Publisher 启动")
-            self.get_logger().info(f"参数配置: headless={self.headless}, offboard_wait_time={self.offboard_wait_time}秒")
+            self.get_logger().info(f"参数配置: headless={self.headless}")
             self.get_logger().info(f"Socket配置: {self.socket_host}:{self.socket_port}")
-            self.get_logger().info("正在等待进入offboard模式...")
+            self.get_logger().info(f"GPS坐标发布间隔: {self.publish_interval}秒")
+            self.get_logger().info("正在等待GPS位置数据...")
 
         # 创建定时器
         self.timer = self.create_timer(0.1, self.timer_callback)
@@ -64,69 +65,95 @@ class GpsOffboardPublisher(Node):
     def vehicle_global_position_callback(self, vehicle_global_position):
         """vehicle_global_position话题订阅者的回调函数。"""
         self.vehicle_global_position = vehicle_global_position
+        if not self.gps_position_received:
+            self.gps_position_received = True
+            if not self.headless:
+                self.get_logger().info("✓ 已接收到GPS位置数据")
 
     def publish_gps_coordinates(self):
         """通过socket发布GPS坐标。"""
+        if not self.headless:
+            self.get_logger().info("开始发布GPS坐标...")
+        
+        # 检查GPS数据是否有效
         if not hasattr(self.vehicle_global_position, 'lat') or not hasattr(self.vehicle_global_position, 'lon') or not hasattr(self.vehicle_global_position, 'alt'):
             if not self.headless:
                 self.get_logger().warn("GPS数据无效，无法发布")
             return
+        
+        # 检查GPS坐标有效性
+        lat_lon_valid = getattr(self.vehicle_global_position, 'lat_lon_valid', False)
+        alt_valid = getattr(self.vehicle_global_position, 'alt_valid', False)
+        
+        if not self.headless:
+            self.get_logger().info(f"GPS数据有效性: lat_lon_valid={lat_lon_valid}, alt_valid={alt_valid}")
+            self.get_logger().info(f"GPS坐标: lat={self.vehicle_global_position.lat}, lon={self.vehicle_global_position.lon}, alt={self.vehicle_global_position.alt}")
         
         # 准备GPS数据
         gps_data = {
             'latitude': self.vehicle_global_position.lat,
             'longitude': self.vehicle_global_position.lon,
             'altitude': self.vehicle_global_position.alt,
-            'timestamp': self.vehicle_global_position.timestamp
+            'timestamp': getattr(self.vehicle_global_position, 'timestamp', 0)
         }
         
         try:
+            if not self.headless:
+                self.get_logger().info(f"尝试连接到Socket服务器: {self.socket_host}:{self.socket_port}")
+            
+            # 设置socket超时
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(5.0)  # 5秒超时
+            
             # 创建socket连接
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.connect((self.socket_host, self.socket_port))
-                # 发送GPS数据
-                data = json.dumps(gps_data).encode('utf-8')
-                s.sendall(data)
-                if not self.headless:
-                    self.get_logger().info(f"✅ GPS坐标已发布: {gps_data}")
-                self.gps_published = True
+            s.connect((self.socket_host, self.socket_port))
+            
+            if not self.headless:
+                self.get_logger().info("成功连接到Socket服务器")
+            
+            # 发送GPS数据
+            data = json.dumps(gps_data).encode('utf-8')
+            s.sendall(data)
+            
+            if not self.headless:
+                self.get_logger().info(f"✅ GPS坐标已发布: {gps_data}")
+            
+            # 关闭连接
+            s.close()
+            
+        except socket.timeout:
+            if not self.headless:
+                self.get_logger().error(f"Socket连接超时: 无法连接到 {self.socket_host}:{self.socket_port}")
+                self.get_logger().error("请确保GPS接收器程序正在运行，并且IP地址和端口正确")
+        except ConnectionRefusedError:
+            if not self.headless:
+                self.get_logger().error(f"连接被拒绝: {self.socket_host}:{self.socket_port}")
+                self.get_logger().error("请确保GPS接收器程序正在运行")
         except Exception as e:
             if not self.headless:
                 self.get_logger().error(f"发布GPS坐标失败: {str(e)}")
+                import traceback
+                self.get_logger().error(f"详细错误: {traceback.format_exc()}")
 
     def timer_callback(self) -> None:
         """定时器的回调函数。"""
-        # 检查是否已经发布了GPS坐标
-        if self.gps_published:
+        # 检查是否接收到GPS位置数据
+        if not self.gps_position_received:
             return
         
-        # 检查是否处于OFFBOARD模式
-        is_offboard = hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') and \
-                     self.vehicle_control_mode.flag_control_offboard_enabled
-        
-        if is_offboard:
-            if not self.offboard_mode_detected:
-                # 第一次检测到offboard模式，记录时间
-                self.offboard_entry_time = self.get_clock().now()
-                self.offboard_mode_detected = True
-                if not self.headless:
-                    self.get_logger().info("已进入offboard模式，开始计时")
-            else:
-                # 计算已经在offboard模式的时间
-                current_time = self.get_clock().now()
-                elapsed_time = (current_time - self.offboard_entry_time).nanoseconds / 1e9
-                
-                # 检查是否已经等待了足够的时间
-                if elapsed_time >= self.offboard_wait_time:
-                    # 发布GPS坐标
-                    self.publish_gps_coordinates()
+        # 检查是否达到发布间隔
+        current_time = self.get_clock().now()
+        if self.last_published_time is None:
+            # 第一次发布
+            self.publish_gps_coordinates()
+            self.last_published_time = current_time
         else:
-            # 退出offboard模式，重置状态
-            if self.offboard_mode_detected:
-                self.offboard_entry_time = None
-                self.offboard_mode_detected = False
-                if not self.headless:
-                    self.get_logger().info("已退出offboard模式，重置状态")
+            # 计算距离上次发布的时间
+            elapsed_time = (current_time - self.last_published_time).nanoseconds / 1e9
+            if elapsed_time >= self.publish_interval:
+                # 达到发布间隔，发布GPS坐标
+                self.publish_gps_coordinates()
+                self.last_published_time = current_time
 
     def destroy_node(self):
         """节点销毁时的清理工作。"""
