@@ -31,7 +31,7 @@ class GpsOffboardPublisher(Node):
         # 参数配置
         self.declare_parameter('headless', False)  # 是否启用headless模式
         self.declare_parameter('offboard_wait_time', 2.0)  # 进入offboard模式后等待时间（秒）
-        self.declare_parameter('socket_host', 'localhost')  # Socket服务器主机
+        self.declare_parameter('socket_host', '10.5.9.8')  # Socket服务器主机
         self.declare_parameter('socket_port', 5000)  # Socket服务器端口
         
         # 获取参数
