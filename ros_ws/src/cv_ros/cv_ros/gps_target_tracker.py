@@ -52,6 +52,8 @@ class GpsTargetTracker(Node):
         self.declare_parameter('socket_port', 5000)  # Socket监听端口
         self.declare_parameter('south_distance', 2.0)  # 向南移动距离（米）
         self.declare_parameter('altitude_offset', 2.0)  # 高度偏移（米）
+        self.declare_parameter('max_horizontal_velocity', 1.0)  # 最大水平速度（米/秒）
+        self.declare_parameter('max_vertical_velocity', 0.5)  # 最大垂直速度（米/秒）
         
         # 获取参数
         self.headless = self.get_parameter('headless').value
@@ -60,6 +62,8 @@ class GpsTargetTracker(Node):
         self.socket_port = self.get_parameter('socket_port').value
         self.south_distance = self.get_parameter('south_distance').value
         self.altitude_offset = self.get_parameter('altitude_offset').value
+        self.max_horizontal_velocity = self.get_parameter('max_horizontal_velocity').value
+        self.max_vertical_velocity = self.get_parameter('max_vertical_velocity').value
 
         # 初始化变量
         self.vehicle_control_mode = VehicleControlMode()
@@ -83,6 +87,7 @@ class GpsTargetTracker(Node):
             self.get_logger().info(f"参数配置: headless={self.headless}, offboard_wait_time={self.offboard_wait_time}秒")
             self.get_logger().info(f"Socket配置: {self.socket_host}:{self.socket_port}")
             self.get_logger().info(f"目标位置偏移: 南方{self.south_distance}米, 高度+{self.altitude_offset}米")
+            self.get_logger().info(f"速度限制: 水平最大{self.max_horizontal_velocity}米/秒, 垂直最大{self.max_vertical_velocity}米/秒")
             self.get_logger().info("正在等待GPS坐标数据...")
 
         # 创建定时器
@@ -239,10 +244,31 @@ class GpsTargetTracker(Node):
         trajectory_msg.y = ned_y  # 东方向
         trajectory_msg.z = ned_z  # 天方向（负号表示向下）
         
-        # 设置速度为0
-        trajectory_msg.vx = 0.0
-        trajectory_msg.vy = 0.0
-        trajectory_msg.vz = 0.0
+        # 计算速度向量（基于目标位置和当前位置的差值）
+        # 计算水平距离
+        horizontal_distance = math.sqrt(ned_x**2 + ned_y**2)
+        # 计算垂直距离
+        vertical_distance = abs(ned_z)
+        
+        # 计算速度向量
+        if horizontal_distance > 0.1:  # 避免除以零
+            # 计算水平速度分量
+            vx = ned_x / horizontal_distance * min(self.max_horizontal_velocity, horizontal_distance * 0.5)
+            vy = ned_y / horizontal_distance * min(self.max_horizontal_velocity, horizontal_distance * 0.5)
+        else:
+            vx = 0.0
+            vy = 0.0
+        
+        if vertical_distance > 0.1:  # 避免除以零
+            # 计算垂直速度分量
+            vz = ned_z / vertical_distance * min(self.max_vertical_velocity, vertical_distance * 0.5)
+        else:
+            vz = 0.0
+        
+        # 设置速度
+        trajectory_msg.vx = vx  # 北方向速度
+        trajectory_msg.vy = vy  # 东方向速度
+        trajectory_msg.vz = vz  # 天方向速度（负号表示向下）
         
         # 设置加速度为0
         trajectory_msg.acceleration[0] = 0.0
@@ -259,6 +285,7 @@ class GpsTargetTracker(Node):
         if not self.headless:
             self.get_logger().info(f"发布目标位置: x={ned_x:.2f}, y={ned_y:.2f}, z={ned_z:.2f}")
             self.get_logger().info(f"目标GPS位置: lat={target_lat}, lon={target_lon}, alt={target_alt}")
+            self.get_logger().info(f"速度设置: vx={vx:.2f}, vy={vy:.2f}, vz={vz:.2f}")
 
     def timer_callback(self) -> None:
         """定时器的回调函数。"""
