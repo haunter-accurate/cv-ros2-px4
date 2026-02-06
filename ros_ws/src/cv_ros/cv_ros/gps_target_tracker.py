@@ -12,7 +12,7 @@ ros2 run cv_ros gps_target_tracker
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import VehicleControlMode, TrajectorySetpoint, VehicleGlobalPosition
+from px4_msgs.msg import VehicleControlMode, TrajectorySetpoint, VehicleGlobalPosition, OffboardControlMode, VehicleCommand
 import socket
 import json
 import threading
@@ -42,8 +42,12 @@ class GpsTargetTracker(Node):
             VehicleGlobalPosition, '/fmu/out/vehicle_global_position', self.vehicle_global_position_callback, qos_profile)
 
         # 创建发布者
+        self.offboard_control_mode_publisher = self.create_publisher(
+            OffboardControlMode, '/fmu/in/offboard_control_mode', qos_profile)
         self.trajectory_setpoint_publisher = self.create_publisher(
             TrajectorySetpoint, '/fmu/in/trajectory_setpoint', qos_profile)
+        self.vehicle_command_publisher = self.create_publisher(
+            VehicleCommand, '/fmu/in/vehicle_command', qos_profile)
 
         # 参数配置
         self.declare_parameter('headless', False)  # 是否启用headless模式
@@ -66,6 +70,7 @@ class GpsTargetTracker(Node):
         self.max_vertical_velocity = self.get_parameter('max_vertical_velocity').value
 
         # 初始化变量
+        self.offboard_setpoint_counter = 0
         self.vehicle_control_mode = VehicleControlMode()
         self.vehicle_global_position = VehicleGlobalPosition()  # 本机GPS位置
         self.offboard_entry_time = None  # 记录进入offboard模式的时间
@@ -108,6 +113,36 @@ class GpsTargetTracker(Node):
             self.vehicle_global_position_received = True
             if not self.headless:
                 self.get_logger().info("✓ 已接收到本机GPS位置数据")
+
+    def publish_offboard_control_heartbeat_signal(self):
+        """发布offboard控制模式。"""
+        msg = OffboardControlMode()
+        msg.position = True
+        msg.velocity = False
+        msg.acceleration = False
+        msg.attitude = False
+        msg.body_rate = False
+        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        self.offboard_control_mode_publisher.publish(msg)
+
+    def publish_vehicle_command(self, command, **params) -> None:
+        """发布无人机命令。"""
+        msg = VehicleCommand()
+        msg.command = command
+        msg.param1 = params.get("param1", 0.0)
+        msg.param2 = params.get("param2", 0.0)
+        msg.param3 = params.get("param3", 0.0)
+        msg.param4 = params.get("param4", 0.0)
+        msg.param5 = params.get("param5", 0.0)
+        msg.param6 = params.get("param6", 0.0)
+        msg.param7 = params.get("param7", 0.0)
+        msg.target_system = 1
+        msg.target_component = 1
+        msg.source_system = 1
+        msg.source_component = 1
+        msg.from_external = True
+        msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
+        self.vehicle_command_publisher.publish(msg)
 
     def receive_gps_coordinates(self):
         """通过socket接收GPS坐标的线程函数。"""
@@ -289,6 +324,15 @@ class GpsTargetTracker(Node):
 
     def timer_callback(self) -> None:
         """定时器的回调函数。"""
+        # 发布offboard控制模式心跳信号（无论是否在OFFBOARD模式）
+        self.publish_offboard_control_heartbeat_signal()
+
+        # 记录当前控制模式和高度（仅在非headless模式下）
+        if self.offboard_setpoint_counter % 10 == 0 and not self.headless:
+            is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') else False
+            altitude = self.vehicle_global_position.alt if hasattr(self.vehicle_global_position, 'alt') else "未知"
+            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 高度: {altitude}")
+
         # 检查是否接收到GPS坐标
         if not self.received_gps_position:
             if not self.headless and rclpy.ok():
@@ -355,6 +399,10 @@ class GpsTargetTracker(Node):
                 self.target_position_active = False
                 if not self.headless:
                     self.get_logger().info("已退出offboard模式，重置状态")
+
+        # 更新计数器
+        if self.offboard_setpoint_counter < 100:
+            self.offboard_setpoint_counter += 1
 
     def destroy_node(self):
         """节点销毁时的清理工作。"""
