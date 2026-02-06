@@ -46,6 +46,16 @@ python ~/cv-ros2-px4/ros_ws/src/cv_ros/cv_ros/red_color_detector_ros2.py --ros-a
 python ~/cv-ros2-px4/ros_ws/src/cv_ros/cv_ros/color_tracking_offboard.py
 ```
 
+### 6. 启动GPS位置发布节点
+```bash
+python gps_offboard_publisher.py --ros-args -p socket_host:=10.5.211.119
+```
+
+### 7. 启动GPS目标跟踪节点
+```bash
+python gps_gps_target_tracker.py
+```
+
 ## 操作流程
 
 1. 按照上述步骤依次启动各个组件
