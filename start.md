@@ -53,7 +53,7 @@ python gps_offboard_publisher.py --ros-args -p socket_host:=10.5.211.119
 
 ### 7. 启动GPS目标跟踪节点
 ```bash
-python gps_gps_target_tracker.py
+python gps_target_tracker.py
 ```
 
 ## 操作流程

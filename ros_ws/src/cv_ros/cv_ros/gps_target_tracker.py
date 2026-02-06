@@ -291,15 +291,31 @@ class GpsTargetTracker(Node):
         """定时器的回调函数。"""
         # 检查是否接收到GPS坐标
         if not self.received_gps_position:
+            if not self.headless and rclpy.ok():
+                # 每5秒输出一次，避免日志过多
+                if not hasattr(self, 'last_no_gps_log') or (self.get_clock().now() - self.last_no_gps_log).nanoseconds / 1e9 > 5:
+                    self.get_logger().info("等待GPS坐标数据...")
+                    self.last_no_gps_log = self.get_clock().now()
             return
         
         # 检查是否接收到本机GPS位置
         if not self.vehicle_global_position_received:
+            if not self.headless and rclpy.ok():
+                # 每5秒输出一次，避免日志过多
+                if not hasattr(self, 'last_no_local_gps_log') or (self.get_clock().now() - self.last_no_local_gps_log).nanoseconds / 1e9 > 5:
+                    self.get_logger().info("等待本机GPS位置数据...")
+                    self.last_no_local_gps_log = self.get_clock().now()
             return
         
         # 检查是否处于OFFBOARD模式
         is_offboard = hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') and \
                      self.vehicle_control_mode.flag_control_offboard_enabled
+        
+        if not self.headless and rclpy.ok():
+            # 每5秒输出一次offboard状态，避免日志过多
+            if not hasattr(self, 'last_offboard_status_log') or (self.get_clock().now() - self.last_offboard_status_log).nanoseconds / 1e9 > 5:
+                self.get_logger().info(f"当前状态: offboard模式={'是' if is_offboard else '否'}, 目标位置激活={'是' if self.target_position_active else '否'}")
+                self.last_offboard_status_log = self.get_clock().now()
         
         if is_offboard:
             if not self.offboard_mode_detected:
@@ -313,6 +329,12 @@ class GpsTargetTracker(Node):
                 current_time = self.get_clock().now()
                 elapsed_time = (current_time - self.offboard_entry_time).nanoseconds / 1e9
                 
+                if not self.headless and rclpy.ok():
+                    # 每2秒输出一次计时信息，避免日志过多
+                    if not hasattr(self, 'last_timer_log') or (current_time - self.last_timer_log).nanoseconds / 1e9 > 2:
+                        self.get_logger().info(f"在offboard模式的时间: {elapsed_time:.1f}秒, 等待时间: {self.offboard_wait_time}秒")
+                        self.last_timer_log = current_time
+                
                 # 检查是否已经等待了足够的时间
                 if elapsed_time >= self.offboard_wait_time:
                     # 激活目标位置
@@ -322,6 +344,8 @@ class GpsTargetTracker(Node):
                             self.get_logger().info("开始追踪目标位置")
                     
                     # 发布目标位置
+                    if not self.headless:
+                        self.get_logger().info("准备发布目标位置...")
                     self.publish_target_position()
         else:
             # 退出offboard模式，重置状态
