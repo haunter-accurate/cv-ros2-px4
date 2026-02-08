@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleControlMode
+from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleLocalPosition, VehicleControlMode, VehicleStatus
 
 
 class OffboardForward1m(Node):
@@ -33,6 +33,8 @@ class OffboardForward1m(Node):
             VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
         self.vehicle_control_mode_subscriber = self.create_subscription(
             VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
+        self.vehicle_status_subscriber = self.create_subscription(
+            VehicleStatus, '/fmu/out/vehicle_status', self.vehicle_status_callback, qos_profile)
 
         # 参数配置
         self.declare_parameter('headless', False)  # 是否启用headless模式（无详细日志）
@@ -58,6 +60,7 @@ class OffboardForward1m(Node):
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
         self.vehicle_control_mode = VehicleControlMode()
+        self.vehicle_status = VehicleStatus()
         self.has_sent_forward_command = False  # 标记是否已经计算了目标位置
         self.offboard_entry_time = None  # 记录进入offboard模式的时间
         self.offboard_mode_maintained = False  # 标记offboard模式是否已经维持了2秒
@@ -86,6 +89,10 @@ class OffboardForward1m(Node):
     def vehicle_control_mode_callback(self, vehicle_control_mode):
         """vehicle_control_mode话题订阅者的回调函数。"""
         self.vehicle_control_mode = vehicle_control_mode
+
+    def vehicle_status_callback(self, vehicle_status):
+        """vehicle_status话题订阅者的回调函数。"""
+        self.vehicle_status = vehicle_status
 
     def arm(self):
         """向无人机发送解锁命令。"""
@@ -221,18 +228,20 @@ class OffboardForward1m(Node):
         # 发布offboard控制模式心跳信号（无论是否在OFFBOARD模式）
         self.publish_offboard_control_heartbeat_signal()
 
-        # 记录当前控制模式和高度（仅在非headless模式下）
+        # 记录当前控制模式和解锁状态（仅在非headless模式下）
         if self.offboard_setpoint_counter % 10 == 0 and not self.headless:
             is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') else False
+            is_armed = self.vehicle_status.arming_state == self.vehicle_status.ARMING_STATE_ARMED if hasattr(self.vehicle_status, 'arming_state') else False
             altitude = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "未知"
-            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 高度: {altitude}")
+            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 解锁状态: {is_armed}, 高度: {altitude}")
 
         # 检查是否处于OFFBOARD模式
         is_offboard = hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') and \
                      self.vehicle_control_mode.flag_control_offboard_enabled
         
-        # 检查是否已经起飞（高度大于0.1米，根据实际高度值表示方式调整）
-        is_flying = self.vehicle_local_position.z > 0.1
+        # 检查是否已经解锁
+        is_armed = hasattr(self.vehicle_status, 'arming_state') and \
+                   self.vehicle_status.arming_state == self.vehicle_status.ARMING_STATE_ARMED
         
         # 处理offboard模式计时逻辑
         if is_offboard:
@@ -259,8 +268,8 @@ class OffboardForward1m(Node):
                 if not self.headless:
                     self.get_logger().info("已退出offboard模式，重置计时")
         
-        # 只有在OFFBOARD模式维持2秒且已经起飞的情况下才发送目标位置
-        if self.offboard_mode_maintained and is_flying:
+        # 只有在OFFBOARD模式维持2秒且已经解锁的情况下才发送目标位置
+        if self.offboard_mode_maintained and is_armed:
             # 只计算一次向前1米的目标位置
             if not self.has_sent_forward_command:
                 # 计算目标位置（当前位置向前1米，在NED坐标系中X轴是向前的）
@@ -320,7 +329,7 @@ class OffboardForward1m(Node):
             # 持续发布目标位置，确保无人机保持在目标位置
             self.publish_position_setpoint(self.target_x, self.target_y, self.target_z)
         elif is_offboard and not self.headless:
-            self.get_logger().info("处于OFFBOARD模式，但飞机尚未起飞")
+            self.get_logger().info("处于OFFBOARD模式，但飞机尚未解锁")
         elif not self.headless:
             self.get_logger().info("未处于OFFBOARD模式，等待遥控器切换")
 
