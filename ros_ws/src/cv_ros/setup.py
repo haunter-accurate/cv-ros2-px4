@@ -31,6 +31,7 @@ setup(
             'rc_channels_monitor = cv_ros.rc_channels_monitor:main',
             'gps_offboard_publisher = cv_ros.gps_offboard_publisher:main',
             'gps_coordinate_receiver = cv_ros.gps_coordinate_receiver:main',
+            'aruco_detector_ros2 = cv_ros.aruco_detector_ros2:main',
         ],
     },
 )
