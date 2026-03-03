@@ -76,6 +76,9 @@ class ArucoDetectorROS2(Node):
         self._init_camera_parameters()
         self._init_camera()
 
+        self.declare_parameter('target_aruco_id', 0)
+        self.target_aruco_id = self.get_parameter('target_aruco_id').value
+
         self.pixel_per_degree_x = 2.4
         self.pixel_per_degree_y = 2.4
         self.cmp_pixel_x = 0.01
@@ -98,6 +101,8 @@ class ArucoDetectorROS2(Node):
         self.max_consecutive_loss = 2
 
         self.timer = self.create_timer(0.05, self.timer_callback)
+
+        self.get_logger().info(f"目标ArUco ID: {self.target_aruco_id}")
 
     def _init_camera_parameters(self):
         try:
@@ -269,6 +274,12 @@ class ArucoDetectorROS2(Node):
             self.consecutive_loss_count = 0
 
             for i in range(len(marker_ids)):
+                marker_id = marker_ids[i][0] if marker_ids[i].ndim > 0 else marker_ids[i]
+
+                if marker_id != self.target_aruco_id:
+                    self.get_logger().debug(f"跳过非目标标记 ID: {marker_id}")
+                    continue
+
                 success, rvec, tvec = cv2.solvePnP(
                     np.array([[-self.aruco_length/2, self.aruco_length/2, 0],
                               [self.aruco_length/2, self.aruco_length/2, 0],
@@ -281,8 +292,6 @@ class ArucoDetectorROS2(Node):
                 )
 
                 if success:
-                    marker_id = marker_ids[i][0] if marker_ids[i].ndim > 0 else marker_ids[i]
-
                     distance = np.linalg.norm(tvec)
                     calibrated_distance = distance
                     calibrated_tvec = tvec.flatten().copy()
@@ -310,7 +319,7 @@ class ArucoDetectorROS2(Node):
                     )
                     break
                 else:
-                    self.get_logger().warn(f"Marker ID: {marker_ids[i][0]} 位姿估计失败")
+                    self.get_logger().warn(f"Marker ID: {marker_id} 位姿估计失败")
         else:
             if self.target_loss_hold_time < self.tlh_time:
                 self.target_loss_hold_time += 1
