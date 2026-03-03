@@ -4,7 +4,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from geometry_msgs.msg import Point, Quaternion
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Bool
 from px4_msgs.msg import VehicleAttitude, VehicleLocalPosition
 import cv2
 import cv2.aruco as aruco
@@ -29,6 +29,8 @@ class ArucoDetectorROS2(Node):
             Point, '/detection/aruco_position', qos_profile)
         self.aruco_x_axis_yaw_publisher = self.create_publisher(
             Float32, '/detection/aruco_x_axis_yaw', qos_profile)
+        self.aruco_detected_publisher = self.create_publisher(
+            Bool, '/detection/aruco_detected', qos_profile)
 
         self.vehicle_attitude_subscriber = self.create_subscription(
             VehicleAttitude, '/fmu/out/vehicle_attitude', 
@@ -93,7 +95,7 @@ class ArucoDetectorROS2(Node):
         self.filtered_yaw = 0.0
         self.last_valid_data = None
         self.consecutive_loss_count = 0
-        self.max_consecutive_loss = 1
+        self.max_consecutive_loss = 2
 
         self.timer = self.create_timer(0.05, self.timer_callback)
 
@@ -330,6 +332,10 @@ class ArucoDetectorROS2(Node):
             yaw_msg = Float32()
             yaw_msg.data = self.filtered_yaw
             self.aruco_x_axis_yaw_publisher.publish(yaw_msg)
+
+            detected_msg = Bool()
+            detected_msg.data = True
+            self.aruco_detected_publisher.publish(detected_msg)
         elif self.last_valid_data is not None and self.consecutive_loss_count < self.max_consecutive_loss:
             self.consecutive_loss_count += 1
             self.get_logger().info(f"使用上一帧数据（连续丢失帧数: {self.consecutive_loss_count}）")
@@ -343,10 +349,18 @@ class ArucoDetectorROS2(Node):
             yaw_msg = Float32()
             yaw_msg.data = self.filtered_yaw
             self.aruco_x_axis_yaw_publisher.publish(yaw_msg)
+
+            detected_msg = Bool()
+            detected_msg.data = True
+            self.aruco_detected_publisher.publish(detected_msg)
         else:
             if self.last_valid_data is not None:
                 self.get_logger().warn(f"连续丢失帧数超过阈值（{self.max_consecutive_loss}），停止输出")
             self.last_valid_data = None
+
+            detected_msg = Bool()
+            detected_msg.data = False
+            self.aruco_detected_publisher.publish(detected_msg)
 
     def destroy_node(self):
         if hasattr(self, 'cap') and self.cap.isOpened():
