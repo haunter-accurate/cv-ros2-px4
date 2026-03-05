@@ -321,6 +321,21 @@ class ArucoDetectorROS2(Node):
                     current_yaw = aruco_x_yaw
                     self.last_valid_data = (current_position, current_yaw)
 
+                    if hasattr(self.vehicle_attitude, 'q'):
+                        roll, pitch, yaw = self.quaternion_to_euler(
+                            self.vehicle_attitude.q[0],
+                            self.vehicle_attitude.q[1],
+                            self.vehicle_attitude.q[2],
+                            self.vehicle_attitude.q[3]
+                        )
+                        roll_deg = math.degrees(roll)
+                        pitch_deg = math.degrees(pitch)
+                        yaw_deg = math.degrees(yaw)
+                    else:
+                        roll_deg = 0.0
+                        pitch_deg = 0.0
+                        yaw_deg = 0.0
+
                     current_time = self.get_clock().now()
                     if self.last_log_time is None or (current_time - self.last_log_time).nanoseconds / 1e9 >= self.log_interval:
                         self.last_log_time = current_time
@@ -328,7 +343,8 @@ class ArucoDetectorROS2(Node):
                             f"Marker ID: {marker_id}, "
                             f"解耦前: ({original_x:.3f}, {original_y:.3f}, {original_z:.3f}) m, "
                             f"解耦后: ({decoupled_x:.3f}, {decoupled_y:.3f}, {decoupled_z:.3f}) m, "
-                            f"X-axis Yaw: {math.degrees(aruco_x_yaw):.1f} deg"
+                            f"X-axis Yaw: {math.degrees(aruco_x_yaw):.1f} deg, "
+                            f"无人机姿态: Roll={roll_deg:.1f}°, Pitch={pitch_deg:.1f}°, Yaw={yaw_deg:.1f}°"
                         )
                     break
                 else:
