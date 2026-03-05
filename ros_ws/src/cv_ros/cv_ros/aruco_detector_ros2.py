@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
@@ -41,6 +42,8 @@ class ArucoDetectorROS2(Node):
 
         self.vehicle_attitude = VehicleAttitude()
         self.vehicle_local_position = VehicleLocalPosition()
+
+        self.script_dir = os.path.dirname(os.path.abspath(__file__))
 
         self.aruco_length = 0.05
         self.dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_100)
@@ -100,13 +103,19 @@ class ArucoDetectorROS2(Node):
         self.consecutive_loss_count = 0
         self.max_consecutive_loss = 2
 
+        self.last_log_time = None
+        self.log_interval = 1.0
+
         self.timer = self.create_timer(0.05, self.timer_callback)
 
         self.get_logger().info(f"目标ArUco ID: {self.target_aruco_id}")
 
     def _init_camera_parameters(self):
+        camera_calib_path = os.path.join(self.script_dir, 'camera_calibration_data.npz')
+        distance_calib_path = os.path.join(self.script_dir, 'distance_calibration_data.npz')
+        
         try:
-            with np.load('camera_calibration_data.npz') as data:
+            with np.load(camera_calib_path) as data:
                 self.camera_matrix = data['camera_matrix']
                 self.dist_coeffs = data['dist_coeffs']
             self.get_logger().info("成功加载自定义相机标定参数")
@@ -128,7 +137,7 @@ class ArucoDetectorROS2(Node):
 
         self.distance_calibration = None
         try:
-            with np.load('distance_calibration_data.npz') as data:
+            with np.load(distance_calib_path) as data:
                 a = data['a']
                 b = data['b']
                 self.distance_calibration = (a, b)
@@ -235,7 +244,7 @@ class ArucoDetectorROS2(Node):
             decoupled_x = aruco_x
             decoupled_y = aruco_y
 
-        return decoupled_x, decoupled_y, aruco_z
+        return (aruco_x, aruco_y, aruco_z), (decoupled_x, decoupled_y, aruco_z)
 
     def calculate_aruco_x_axis_yaw(self, rvec):
         """
@@ -303,7 +312,7 @@ class ArucoDetectorROS2(Node):
                             scale_factor = calibrated_distance / distance
                             calibrated_tvec = tvec.flatten() * scale_factor
 
-                    decoupled_x, decoupled_y, decoupled_z = self.decouple_aruco_position(
+                    (original_x, original_y, original_z), (decoupled_x, decoupled_y, decoupled_z) = self.decouple_aruco_position(
                         calibrated_tvec.reshape(3, 1), rvec)
 
                     aruco_x_yaw = self.calculate_aruco_x_axis_yaw(rvec)
@@ -312,11 +321,15 @@ class ArucoDetectorROS2(Node):
                     current_yaw = aruco_x_yaw
                     self.last_valid_data = (current_position, current_yaw)
 
-                    self.get_logger().info(
-                        f"Marker ID: {marker_id}, "
-                        f"Position: ({decoupled_x:.3f}, {decoupled_y:.3f}, {decoupled_z:.3f}) m, "
-                        f"X-axis Yaw: {math.degrees(aruco_x_yaw):.1f} deg"
-                    )
+                    current_time = self.get_clock().now()
+                    if self.last_log_time is None or (current_time - self.last_log_time).nanoseconds / 1e9 >= self.log_interval:
+                        self.last_log_time = current_time
+                        self.get_logger().info(
+                            f"Marker ID: {marker_id}, "
+                            f"解耦前: ({original_x:.3f}, {original_y:.3f}, {original_z:.3f}) m, "
+                            f"解耦后: ({decoupled_x:.3f}, {decoupled_y:.3f}, {decoupled_z:.3f}) m, "
+                            f"X-axis Yaw: {math.degrees(aruco_x_yaw):.1f} deg"
+                        )
                     break
                 else:
                     self.get_logger().warn(f"Marker ID: {marker_id} 位姿估计失败")

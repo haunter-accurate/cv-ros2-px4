@@ -288,9 +288,9 @@ class ArucoTrackingOffboard(Node):
                 
                 vx, vy, vz, dyaw = self.apply_speed_limits(vx, vy, vz, dyaw)
                 
-                new_x = self.vehicle_local_position.x + vx * 0.1
-                new_y = self.vehicle_local_position.y + vy * 0.1
-                new_z = self.vehicle_local_position.z + vz * 0.1
+                new_x = self.vehicle_local_position.x
+                new_y = self.vehicle_local_position.y
+                new_z = self.vehicle_local_position.z
                 new_yaw = self.normalize_angle(self.current_yaw + dyaw * 0.1)
                 
                 self.publish_position_setpoint(new_x, new_y, new_z, new_yaw)
@@ -299,18 +299,12 @@ class ArucoTrackingOffboard(Node):
                                      (self.vehicle_local_position.y - target_y) ** 2 +
                                      (self.vehicle_local_position.z - target_z) ** 2) ** 0.5
                 
-                if distance_to_target < self.position_tolerance and not self.target_reached:
-                    self.target_reached = True
-                    self.get_logger().info(f"✅ 已到达目标位置！距离: {distance_to_target:.3f}m")
-                elif self.target_reached and distance_to_target >= self.position_tolerance:
-                    self.target_reached = False
-                
                 if self.offboard_setpoint_counter % 10 == 0:
                     self.get_logger().info(f"目标: ({target_x:.2f}, {target_y:.2f}, {target_z:.2f})m, "
                                          f"当前: ({self.vehicle_local_position.x:.2f}, {self.vehicle_local_position.y:.2f}, {self.vehicle_local_position.z:.2f})m, "
                                          f"误差: {distance_to_target:.3f}m, Yaw: {math.degrees(new_yaw):.1f}°")
             else:
-                self.get_logger().warn("未检测到ArUco码，保持当前位置")
+                self.get_logger().warn("未检测到ArUco码，保持当前位置和朝向")
                 self.publish_position_setpoint(
                     self.vehicle_local_position.x,
                     self.vehicle_local_position.y,
