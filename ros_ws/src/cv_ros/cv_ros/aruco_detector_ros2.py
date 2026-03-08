@@ -32,6 +32,8 @@ class ArucoDetectorROS2(Node):
             Float32, '/detection/aruco_x_axis_yaw', qos_profile)
         self.aruco_detected_publisher = self.create_publisher(
             Bool, '/detection/aruco_detected', qos_profile)
+        self.aruco_time_interval_publisher = self.create_publisher(
+            Float32, '/detection/aruco_time_interval', qos_profile)
 
         self.vehicle_attitude_subscriber = self.create_subscription(
             VehicleAttitude, '/fmu/out/vehicle_attitude', 
@@ -103,10 +105,14 @@ class ArucoDetectorROS2(Node):
         self.consecutive_loss_count = 0
         self.max_consecutive_loss = 2
 
+        self.last_detection_time = None
+        self.last_publish_time = None
+        self.max_detection_interval = 1.0
+
         self.last_log_time = None
         self.log_interval = 1.0
 
-        self.timer = self.create_timer(0.05, self.timer_callback)
+        self.timer = self.create_timer(0.01, self.timer_callback)
 
         self.get_logger().info(f"目标ArUco ID: {self.target_aruco_id}")
 
@@ -274,14 +280,12 @@ class ArucoDetectorROS2(Node):
         detector = aruco.ArucoDetector(self.dictionary, self.parameters)
         marker_corners, marker_ids, rejected_candidates = detector.detectMarkers(gray)
 
+        current_time = self.get_clock().now()
         current_position = None
         current_yaw = None
+        detected_this_frame = False
 
         if marker_ids is not None and len(marker_ids) > 0:
-            self.target_loss = 0
-            self.target_loss_hold_time = 0
-            self.consecutive_loss_count = 0
-
             for i in range(len(marker_ids)):
                 marker_id = marker_ids[i][0] if marker_ids[i].ndim > 0 else marker_ids[i]
 
@@ -320,6 +324,7 @@ class ArucoDetectorROS2(Node):
                     current_position = [decoupled_x, decoupled_y, decoupled_z]
                     current_yaw = aruco_x_yaw
                     self.last_valid_data = (current_position, current_yaw)
+                    detected_this_frame = True
 
                     if hasattr(self.vehicle_attitude, 'q'):
                         roll, pitch, yaw = self.quaternion_to_euler(
@@ -336,7 +341,6 @@ class ArucoDetectorROS2(Node):
                         pitch_deg = 0.0
                         yaw_deg = 0.0
 
-                    current_time = self.get_clock().now()
                     if self.last_log_time is None or (current_time - self.last_log_time).nanoseconds / 1e9 >= self.log_interval:
                         self.last_log_time = current_time
                         self.get_logger().info(
@@ -349,14 +353,15 @@ class ArucoDetectorROS2(Node):
                     break
                 else:
                     self.get_logger().warn(f"Marker ID: {marker_id} 位姿估计失败")
-        else:
-            if self.target_loss_hold_time < self.tlh_time:
-                self.target_loss_hold_time += 1
-            else:
-                self.target_loss = 1
-            self.get_logger().debug("未检测到ArUco标记")
 
-        if current_position is not None and current_yaw is not None:
+        if detected_this_frame:
+            if self.last_detection_time is not None:
+                time_interval = (current_time - self.last_detection_time).nanoseconds / 1e6
+            else:
+                time_interval = 0.0
+            self.last_detection_time = current_time
+            self.last_publish_time = current_time
+
             for j in range(3):
                 self.filtered_position[j] += self.output_lpf_alpha * (current_position[j] - self.filtered_position[j])
             self.filtered_yaw += self.output_lpf_alpha * (current_yaw - self.filtered_yaw)
@@ -374,31 +379,21 @@ class ArucoDetectorROS2(Node):
             detected_msg = Bool()
             detected_msg.data = True
             self.aruco_detected_publisher.publish(detected_msg)
-        elif self.last_valid_data is not None and self.consecutive_loss_count < self.max_consecutive_loss:
-            self.consecutive_loss_count += 1
-            self.get_logger().info(f"使用上一帧数据（连续丢失帧数: {self.consecutive_loss_count}）")
 
-            position_msg = Point()
-            position_msg.x = self.filtered_position[0]
-            position_msg.y = self.filtered_position[1]
-            position_msg.z = self.filtered_position[2]
-            self.aruco_position_publisher.publish(position_msg)
-
-            yaw_msg = Float32()
-            yaw_msg.data = self.filtered_yaw
-            self.aruco_x_axis_yaw_publisher.publish(yaw_msg)
-
-            detected_msg = Bool()
-            detected_msg.data = True
-            self.aruco_detected_publisher.publish(detected_msg)
+            time_interval_msg = Float32()
+            time_interval_msg.data = time_interval
+            self.aruco_time_interval_publisher.publish(time_interval_msg)
         else:
-            if self.last_valid_data is not None:
-                self.get_logger().warn(f"连续丢失帧数超过阈值（{self.max_consecutive_loss}），停止输出")
-            self.last_valid_data = None
+            if self.last_publish_time is not None:
+                time_since_last_publish = (current_time - self.last_publish_time).nanoseconds / 1e9
+                if time_since_last_publish >= self.max_detection_interval:
+                    self.get_logger().warn(f"连续{time_since_last_publish:.1f}秒未检测到目标，发送丢失消息")
+                    self.last_publish_time = None
+                    self.last_valid_data = None
 
-            detected_msg = Bool()
-            detected_msg.data = False
-            self.aruco_detected_publisher.publish(detected_msg)
+                    detected_msg = Bool()
+                    detected_msg.data = False
+                    self.aruco_detected_publisher.publish(detected_msg)
 
     def destroy_node(self):
         if hasattr(self, 'cap') and self.cap.isOpened():
