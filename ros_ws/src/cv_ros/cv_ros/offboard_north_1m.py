@@ -295,7 +295,8 @@ class OffboardNorth1m(Node):
             is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') else False
             is_armed = self.vehicle_status.arming_state == self.vehicle_status.ARMING_STATE_ARMED if hasattr(self.vehicle_status, 'arming_state') else False
             altitude = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "未知"
-            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 解锁状态: {is_armed}, 高度: {altitude}")
+            arming_state_value = self.vehicle_status.arming_state if hasattr(self.vehicle_status, 'arming_state') else "未知"
+            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 解锁状态: {is_armed}, arming_state值: {arming_state_value}, 高度: {altitude}")
 
         # 检查是否处于OFFBOARD模式
         is_offboard = hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') and \
