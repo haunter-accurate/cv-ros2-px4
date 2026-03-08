@@ -53,6 +53,7 @@ class ArucoTrackingOffboard(Node):
         self.declare_parameter('max_horizontal_speed', 0.5)
         self.declare_parameter('max_vertical_speed', 0.3)
         self.declare_parameter('max_yaw_rate', 1.5)
+        self.declare_parameter('yaw_filter_alpha', 0.3)
         self.declare_parameter('pd_kp_x', 0.5)
         self.declare_parameter('pd_kp_y', 0.5)
         self.declare_parameter('pd_kp_z', 0.3)
@@ -68,6 +69,7 @@ class ArucoTrackingOffboard(Node):
         self.max_horizontal_speed = self.get_parameter('max_horizontal_speed').value
         self.max_vertical_speed = self.get_parameter('max_vertical_speed').value
         self.max_yaw_rate = self.get_parameter('max_yaw_rate').value
+        self.yaw_filter_alpha = self.get_parameter('yaw_filter_alpha').value
         self.pd_kp_x = self.get_parameter('pd_kp_x').value
         self.pd_kp_y = self.get_parameter('pd_kp_y').value
         self.pd_kp_z = self.get_parameter('pd_kp_z').value
@@ -93,6 +95,7 @@ class ArucoTrackingOffboard(Node):
         self.last_position_error_time = None
         self.current_yaw = 0.0
         self.target_yaw = 0.0
+        self.filtered_target_yaw = 0.0
 
         self.get_logger().info(f"参数配置: offboard_maintain_time={self.offboard_maintain_time}s")
         self.get_logger().info(f"目标偏移: X={self.target_offset_x}m, Y={self.target_offset_y}m, Z={self.target_offset_z}m")
@@ -284,11 +287,17 @@ class ArucoTrackingOffboard(Node):
                 target_z = self.vehicle_local_position.z + aruco_z - self.target_offset_z
                 
                 aruco_x_axis_yaw = self.aruco_x_axis_yaw
-                self.target_yaw = self.normalize_angle(self.current_yaw + aruco_x_axis_yaw)#这里需要添加当前偏航角
+                self.target_yaw = self.normalize_angle(self.current_yaw + aruco_x_axis_yaw)
+                
+                if self.filtered_target_yaw == 0.0:
+                    self.filtered_target_yaw = self.target_yaw
+                else:
+                    diff = self.normalize_angle(self.target_yaw - self.filtered_target_yaw)
+                    self.filtered_target_yaw = self.normalize_angle(self.filtered_target_yaw + diff * self.yaw_filter_alpha)
                 
                 vx, vy, vz = self.calculate_pd_control(target_x, target_y, target_z)
                 
-                yaw_error = self.normalize_angle(self.target_yaw - self.current_yaw)
+                yaw_error = self.normalize_angle(self.filtered_target_yaw - self.current_yaw)
                 dyaw = yaw_error * 0.5
                 
                 vx, vy, vz, dyaw = self.apply_speed_limits(vx, vy, vz, dyaw)
@@ -296,7 +305,7 @@ class ArucoTrackingOffboard(Node):
                 new_x = self.vehicle_local_position.x
                 new_y = self.vehicle_local_position.y
                 new_z = self.vehicle_local_position.z
-                new_yaw = self.target_yaw
+                new_yaw = self.filtered_target_yaw
                 
                 self.publish_position_setpoint(new_x, new_y, new_z, new_yaw)
                 
@@ -310,6 +319,7 @@ class ArucoTrackingOffboard(Node):
                         f"当前: ({self.vehicle_local_position.x:.2f}, {self.vehicle_local_position.y:.2f}, {self.vehicle_local_position.z:.2f})m, "
                         f"误差: {distance_to_target:.3f}m, "
                         f"目标Yaw: {math.degrees(self.target_yaw):.1f}°, "
+                        f"滤波Yaw: {math.degrees(self.filtered_target_yaw):.1f}°, "
                         f"当前Yaw: {math.degrees(self.current_yaw):.1f}°, "
                         f"Yaw误差: {math.degrees(yaw_error):.1f}°, "
                         f"dyaw: {math.degrees(dyaw):.1f}°, "
