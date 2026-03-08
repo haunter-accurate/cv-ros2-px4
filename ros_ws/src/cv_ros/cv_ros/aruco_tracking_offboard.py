@@ -296,7 +296,7 @@ class ArucoTrackingOffboard(Node):
                 new_x = self.vehicle_local_position.x
                 new_y = self.vehicle_local_position.y
                 new_z = self.vehicle_local_position.z
-                new_yaw = self.normalize_angle(self.current_yaw + dyaw * 0.1)
+                new_yaw = self.target_yaw
                 
                 self.publish_position_setpoint(new_x, new_y, new_z, new_yaw)
                 
