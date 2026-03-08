@@ -9,11 +9,11 @@ from std_msgs.msg import Float32, Bool
 import math
 
 
-class ArucoTrackingOffboard(Node):
-    """在offboard模式下控制无人机跟踪ArUco码的节点"""
+class ArucoPositionTrackingOffboard(Node):
+    """在offboard模式下控制无人机跟踪ArUco码位置的节点（不控制偏航）"""
 
     def __init__(self) -> None:
-        super().__init__('aruco_tracking_offboard')
+        super().__init__('aruco_position_tracking_offboard')
 
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -40,32 +40,28 @@ class ArucoTrackingOffboard(Node):
 
         self.aruco_position_subscriber = self.create_subscription(
             Point, '/detection/aruco_position', self.aruco_position_callback, qos_profile)
-        self.aruco_x_axis_yaw_subscriber = self.create_subscription(
-            Float32, '/detection/aruco_x_axis_yaw', self.aruco_x_axis_yaw_callback, qos_profile)
         self.aruco_detected_subscriber = self.create_subscription(
             Bool, '/detection/aruco_detected', self.aruco_detected_callback, qos_profile)
         self.aruco_time_interval_subscriber = self.create_subscription(
             Float32, '/detection/aruco_time_interval', self.aruco_time_interval_callback, qos_profile)
 
         self.declare_parameter('offboard_maintain_time', 2.0)
-        self.declare_parameter('target_offset_x', 1.0)
+        self.declare_parameter('target_offset_x', 0.0)
         self.declare_parameter('target_offset_y', 0.0)
-        self.declare_parameter('target_offset_z', 3.0)
+        self.declare_parameter('target_offset_z', -3.0)
         self.declare_parameter('position_tolerance', 0.1)
+        self.declare_parameter('position_filter_alpha', 0.3)
         self.declare_parameter('max_horizontal_speed', 0.5)
         self.declare_parameter('max_vertical_speed', 0.3)
-        self.declare_parameter('max_yaw_rate', 1.5)
-        self.declare_parameter('yaw_filter_alpha', 0.3)
 
         self.offboard_maintain_time = self.get_parameter('offboard_maintain_time').value
         self.target_offset_x = self.get_parameter('target_offset_x').value
         self.target_offset_y = self.get_parameter('target_offset_y').value
         self.target_offset_z = self.get_parameter('target_offset_z').value
         self.position_tolerance = self.get_parameter('position_tolerance').value
+        self.position_filter_alpha = self.get_parameter('position_filter_alpha').value
         self.max_horizontal_speed = self.get_parameter('max_horizontal_speed').value
         self.max_vertical_speed = self.get_parameter('max_vertical_speed').value
-        self.max_yaw_rate = self.get_parameter('max_yaw_rate').value
-        self.yaw_filter_alpha = self.get_parameter('yaw_filter_alpha').value
 
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
@@ -74,7 +70,6 @@ class ArucoTrackingOffboard(Node):
         self.vehicle_attitude = VehicleAttitude()
 
         self.aruco_position = Point()
-        self.aruco_x_axis_yaw = 0.0
         self.aruco_detected = False
         self.aruco_time_interval = 0.0
 
@@ -83,13 +78,13 @@ class ArucoTrackingOffboard(Node):
         self.target_reached = False
 
         self.current_yaw = 0.0
-        self.target_yaw = 0.0
-        self.filtered_target_yaw = 0.0
         self.filtered_target_position = [0.0, 0.0, 0.0]
 
         self.get_logger().info(f"参数配置: offboard_maintain_time={self.offboard_maintain_time}s")
         self.get_logger().info(f"目标偏移: X={self.target_offset_x}m, Y={self.target_offset_y}m, Z={self.target_offset_z}m")
-        self.get_logger().info(f"Yaw滤波系数: {self.yaw_filter_alpha}")
+        self.get_logger().info(f"目标位置: 在ArUco码正上方{abs(self.target_offset_z)}m")
+        self.get_logger().info(f"位置滤波系数: {self.position_filter_alpha}")
+        self.get_logger().info(f"速度限制: 水平={self.max_horizontal_speed}m/s, 垂直={self.max_vertical_speed}m/s")
 
         self.timer = self.create_timer(0.1, self.timer_callback)
 
@@ -111,9 +106,6 @@ class ArucoTrackingOffboard(Node):
 
     def aruco_position_callback(self, aruco_position):
         self.aruco_position = aruco_position
-
-    def aruco_x_axis_yaw_callback(self, aruco_x_axis_yaw):
-        self.aruco_x_axis_yaw = aruco_x_axis_yaw.data
 
     def aruco_detected_callback(self, aruco_detected):
         self.aruco_detected = aruco_detected.data
@@ -194,6 +186,32 @@ class ArucoTrackingOffboard(Node):
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.vehicle_command_publisher.publish(msg)
 
+    def apply_speed_limits(self, target_x, target_y, target_z):
+        """应用速度限制，确保移动速度不超过设定值"""
+        dx = target_x - self.vehicle_local_position.x
+        dy = target_y - self.vehicle_local_position.y
+        dz = target_z - self.vehicle_local_position.z
+        
+        horizontal_distance = (dx**2 + dy**2)**0.5
+        vertical_distance = abs(dz)
+        
+        max_horizontal_move = self.max_horizontal_speed * 0.1
+        max_vertical_move = self.max_vertical_speed * 0.1
+        
+        if horizontal_distance > max_horizontal_move:
+            scale = max_horizontal_move / horizontal_distance
+            dx *= scale
+            dy *= scale
+        
+        if vertical_distance > max_vertical_move:
+            dz = math.copysign(max_vertical_move, dz)
+        
+        limited_x = self.vehicle_local_position.x + dx
+        limited_y = self.vehicle_local_position.y + dy
+        limited_z = self.vehicle_local_position.z + dz
+        
+        return limited_x, limited_y, limited_z
+
     def timer_callback(self) -> None:
         self.publish_offboard_control_heartbeat_signal()
 
@@ -217,7 +235,7 @@ class ArucoTrackingOffboard(Node):
                 
                 if elapsed_time >= self.offboard_maintain_time and not self.offboard_mode_maintained:
                     self.offboard_mode_maintained = True
-                    self.get_logger().info(f"offboard模式已维持 {self.offboard_maintain_time} 秒，开始ArUco跟踪控制")
+                    self.get_logger().info(f"offboard模式已维持 {self.offboard_maintain_time} 秒，开始ArUco位置跟踪控制")
         else:
             if self.offboard_entry_time is not None:
                 self.offboard_entry_time = None
@@ -229,32 +247,25 @@ class ArucoTrackingOffboard(Node):
                 aruco_x = self.aruco_position.x
                 aruco_y = self.aruco_position.y
                 aruco_z = self.aruco_position.z
-                aruco_x_axis_yaw = self.aruco_x_axis_yaw
                 
                 target_x = self.vehicle_local_position.x + aruco_x - self.target_offset_x
                 target_y = self.vehicle_local_position.y + aruco_y - self.target_offset_y
                 target_z = self.vehicle_local_position.z + aruco_z - self.target_offset_z
                 
-                self.target_yaw = self.normalize_angle(self.current_yaw + aruco_x_axis_yaw)
-                
-                if self.filtered_target_yaw == 0.0:
-                    self.filtered_target_yaw = self.target_yaw
-                else:
-                    diff = self.normalize_angle(self.target_yaw - self.filtered_target_yaw)
-                    self.filtered_target_yaw = self.normalize_angle(self.filtered_target_yaw + diff * self.yaw_filter_alpha)
-                
                 if self.filtered_target_position[0] == 0.0:
                     self.filtered_target_position = [target_x, target_y, target_z]
                 else:
                     for j in range(3):
-                        self.filtered_target_position[j] += self.yaw_filter_alpha * ([target_x, target_y, target_z][j] - self.filtered_target_position[j])
+                        self.filtered_target_position[j] += self.position_filter_alpha * ([target_x, target_y, target_z][j] - self.filtered_target_position[j])
                 
                 new_x = self.filtered_target_position[0]
                 new_y = self.filtered_target_position[1]
                 new_z = self.filtered_target_position[2]
-                new_yaw = self.filtered_target_yaw
+                new_yaw = self.current_yaw
                 
-                self.publish_position_setpoint(new_x, new_y, new_z, new_yaw)
+                limited_x, limited_y, limited_z = self.apply_speed_limits(new_x, new_y, new_z)
+                
+                self.publish_position_setpoint(limited_x, limited_y, limited_z, new_yaw)
                 
                 distance_to_target = ((self.vehicle_local_position.x - target_x) ** 2 +
                                      (self.vehicle_local_position.y - target_y) ** 2 +
@@ -266,16 +277,19 @@ class ArucoTrackingOffboard(Node):
                         f"目标: ({target_x:.2f}, {target_y:.2f}, {target_z:.2f})m, "
                         f"当前: ({self.vehicle_local_position.x:.2f}, {self.vehicle_local_position.y:.2f}, {self.vehicle_local_position.z:.2f})m, "
                         f"误差: {distance_to_target:.3f}m, "
-                        f"目标Yaw: {math.degrees(self.target_yaw):.1f}°, "
-                        f"滤波Yaw: {math.degrees(self.filtered_target_yaw):.1f}°, "
                         f"当前Yaw: {math.degrees(self.current_yaw):.1f}°"
                     )
             else:
                 self.get_logger().warn("未检测到ArUco码，保持当前位置和朝向")
-                self.publish_position_setpoint(
+                limited_x, limited_y, limited_z = self.apply_speed_limits(
                     self.vehicle_local_position.x,
                     self.vehicle_local_position.y,
-                    self.vehicle_local_position.z,
+                    self.vehicle_local_position.z
+                )
+                self.publish_position_setpoint(
+                    limited_x,
+                    limited_y,
+                    limited_z,
                     self.current_yaw
                 )
         elif is_offboard:
@@ -291,11 +305,11 @@ class ArucoTrackingOffboard(Node):
 
 
 def main(args=None) -> None:
-    print('启动ArUco跟踪offboard控制节点...')
+    print('启动ArUco位置跟踪offboard控制节点...')
     rclpy.init(args=args)
-    aruco_tracking_offboard = ArucoTrackingOffboard()
-    rclpy.spin(aruco_tracking_offboard)
-    aruco_tracking_offboard.destroy_node()
+    aruco_position_tracking_offboard = ArucoPositionTrackingOffboard()
+    rclpy.spin(aruco_position_tracking_offboard)
+    aruco_position_tracking_offboard.destroy_node()
     rclpy.shutdown()
 
 

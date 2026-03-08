@@ -33,6 +33,7 @@ setup(
             'gps_coordinate_receiver = cv_ros.gps_coordinate_receiver:main',
             'aruco_detector_ros2 = cv_ros.aruco_detector_ros2:main',
             'aruco_tracking_offboard = cv_ros.aruco_tracking_offboard:main',
+            'aruco_position_tracking_offboard = cv_ros.aruco_position_tracking_offboard:main',
         ],
     },
 )
