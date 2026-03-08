@@ -296,9 +296,16 @@ class ArucoTrackingOffboard(Node):
                                      (self.vehicle_local_position.z - target_z) ** 2) ** 0.5
                 
                 if self.offboard_setpoint_counter % 10 == 0:
-                    self.get_logger().info(f"目标: ({target_x:.2f}, {target_y:.2f}, {target_z:.2f})m, "
-                                         f"当前: ({self.vehicle_local_position.x:.2f}, {self.vehicle_local_position.y:.2f}, {self.vehicle_local_position.z:.2f})m, "
-                                         f"误差: {distance_to_target:.3f}m, Yaw: {math.degrees(new_yaw):.1f}°")
+                    self.get_logger().info(
+                        f"目标: ({target_x:.2f}, {target_y:.2f}, {target_z:.2f})m, "
+                        f"当前: ({self.vehicle_local_position.x:.2f}, {self.vehicle_local_position.y:.2f}, {self.vehicle_local_position.z:.2f})m, "
+                        f"误差: {distance_to_target:.3f}m, "
+                        f"目标Yaw: {math.degrees(self.target_yaw):.1f}°, "
+                        f"当前Yaw: {math.degrees(self.current_yaw):.1f}°, "
+                        f"Yaw误差: {math.degrees(yaw_error):.1f}°, "
+                        f"dyaw: {math.degrees(dyaw):.1f}°, "
+                        f"新Yaw: {math.degrees(new_yaw):.1f}°"
+                    )
             else:
                 self.get_logger().warn("未检测到ArUco码，保持当前位置和朝向")
                 self.publish_position_setpoint(
