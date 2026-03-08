@@ -52,7 +52,7 @@ class ArucoTrackingOffboard(Node):
         self.declare_parameter('position_tolerance', 0.1)
         self.declare_parameter('max_horizontal_speed', 0.5)
         self.declare_parameter('max_vertical_speed', 0.3)
-        self.declare_parameter('max_yaw_rate', 0.5)
+        self.declare_parameter('max_yaw_rate', 1.5)
         self.declare_parameter('pd_kp_x', 0.5)
         self.declare_parameter('pd_kp_y', 0.5)
         self.declare_parameter('pd_kp_z', 0.3)
@@ -166,6 +166,9 @@ class ArucoTrackingOffboard(Node):
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_control_mode_publisher.publish(msg)
+        
+        if self.offboard_setpoint_counter % 10 == 0:
+            self.get_logger().info(f"发布Offboard控制模式: position=True")
 
     def publish_position_setpoint(self, x: float, y: float, z: float, yaw: float):
         msg = TrajectorySetpoint()
@@ -173,6 +176,9 @@ class ArucoTrackingOffboard(Node):
         msg.yaw = yaw
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.trajectory_setpoint_publisher.publish(msg)
+        
+        if self.offboard_setpoint_counter % 10 == 0:
+            self.get_logger().info(f"发布位置设定点: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, Yaw={math.degrees(yaw):.1f}°")
 
     def publish_vehicle_command(self, command, **params) -> None:
         msg = VehicleCommand()
