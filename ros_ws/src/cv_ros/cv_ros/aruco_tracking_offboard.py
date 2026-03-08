@@ -275,7 +275,8 @@ class ArucoTrackingOffboard(Node):
                 target_y = self.vehicle_local_position.y + aruco_y - self.target_offset_y
                 target_z = self.vehicle_local_position.z + aruco_z - self.target_offset_z
                 
-                self.target_yaw = self.aruco_x_axis_yaw
+                aruco_x_axis_yaw = self.aruco_x_axis_yaw
+                self.target_yaw = self.normalize_angle(self.current_yaw + aruco_x_axis_yaw)#这里需要添加当前偏航角
                 
                 vx, vy, vz = self.calculate_pd_control(target_x, target_y, target_z)
                 
