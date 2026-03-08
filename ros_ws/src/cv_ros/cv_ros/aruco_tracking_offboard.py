@@ -248,8 +248,10 @@ class ArucoTrackingOffboard(Node):
 
         if self.offboard_setpoint_counter % 10 == 0:
             is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') else False
+            is_armed = self.vehicle_status.arming_state == self.vehicle_status.ARMING_STATE_ARMED if hasattr(self.vehicle_status, 'arming_state') else False
             altitude = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "未知"
-            self.get_logger().info(f"OFFBOARD: {is_offboard}, 高度: {altitude}, 检测到ArUco: {self.aruco_detected}")
+            arming_state_value = self.vehicle_status.arming_state if hasattr(self.vehicle_status, 'arming_state') else "未知"
+            self.get_logger().info(f"OFFBOARD: {is_offboard}, ARMED: {is_armed}, arming_state值: {arming_state_value}, 高度: {altitude}, 检测到ArUco: {self.aruco_detected}")
 
         is_offboard = hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') and \
                      self.vehicle_control_mode.flag_control_offboard_enabled
