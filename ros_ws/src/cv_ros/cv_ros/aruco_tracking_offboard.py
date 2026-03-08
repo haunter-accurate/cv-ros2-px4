@@ -242,15 +242,11 @@ class ArucoTrackingOffboard(Node):
 
         if self.offboard_setpoint_counter % 10 == 0:
             is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') else False
-            is_armed = self.vehicle_status.arming_state == self.vehicle_status.ARMING_STATE_ARMED if hasattr(self.vehicle_status, 'arming_state') else False
             altitude = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "未知"
-            self.get_logger().info(f"OFFBOARD: {is_offboard}, ARMED: {is_armed}, 高度: {altitude}, 检测到ArUco: {self.aruco_detected}")
+            self.get_logger().info(f"OFFBOARD: {is_offboard}, 高度: {altitude}, 检测到ArUco: {self.aruco_detected}")
 
         is_offboard = hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') and \
                      self.vehicle_control_mode.flag_control_offboard_enabled
-        
-        is_armed = hasattr(self.vehicle_status, 'arming_state') and \
-                   self.vehicle_status.arming_state == self.vehicle_status.ARMING_STATE_ARMED
 
         if is_offboard:
             if self.offboard_entry_time is None:
@@ -269,7 +265,7 @@ class ArucoTrackingOffboard(Node):
                 self.offboard_mode_maintained = False
                 self.get_logger().info("已退出offboard模式，重置计时")
 
-        if self.offboard_mode_maintained and is_armed:
+        if self.offboard_mode_maintained:
             if self.aruco_detected:
                 aruco_x = self.aruco_position.x
                 aruco_y = self.aruco_position.y
@@ -312,7 +308,7 @@ class ArucoTrackingOffboard(Node):
                     self.current_yaw
                 )
         elif is_offboard:
-            self.get_logger().info("处于OFFBOARD模式，但飞机尚未解锁")
+            self.get_logger().info("处于OFFBOARD模式，等待维持时间到达")
         else:
             self.get_logger().info("未处于OFFBOARD模式，等待遥控器切换")
 
