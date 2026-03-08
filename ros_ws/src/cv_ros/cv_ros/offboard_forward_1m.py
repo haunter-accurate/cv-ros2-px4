@@ -263,8 +263,8 @@ class OffboardForward1m(Node):
                 if not self.headless:
                     self.get_logger().info("已退出offboard模式，重置计时")
         
-        # 只有在OFFBOARD模式维持2秒且已经解锁的情况下才发送目标位置
-        if self.offboard_mode_maintained and is_armed:
+        # 只有在OFFBOARD模式维持2秒的情况下才发送目标位置
+        if self.offboard_mode_maintained:
             # 只计算一次向前1米的目标位置
             if not self.has_sent_forward_command:
                 # 计算目标位置（当前位置向前1米，在NED坐标系中X轴是向前的）
