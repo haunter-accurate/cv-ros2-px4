@@ -78,9 +78,6 @@ class ArucoDetectorROS2(Node):
         self.mapx = None
         self.mapy = None
 
-        self._init_camera_parameters()
-        self._init_camera()
-
         self.declare_parameter('target_aruco_id', 0)
         self.target_aruco_id = self.get_parameter('target_aruco_id').value
 
@@ -112,9 +109,16 @@ class ArucoDetectorROS2(Node):
         self.last_log_time = None
         self.log_interval = 1.0
 
+        self.camera_initialized = False
+        self._init_camera_parameters()
+        self._init_camera()
+
         self.timer = self.create_timer(0.01, self.timer_callback)
 
-        self.get_logger().info(f"目标ArUco ID: {self.target_aruco_id}")
+        if self.camera_initialized:
+            self.get_logger().info(f"目标ArUco ID: {self.target_aruco_id}")
+        else:
+            self.get_logger().error("相机初始化失败，节点无法正常工作")
 
     def _init_camera_parameters(self):
         camera_calib_path = os.path.join(self.script_dir, 'camera_calibration_data.npz')
@@ -152,9 +156,31 @@ class ArucoDetectorROS2(Node):
             self.get_logger().info("未找到距离标定参数，使用原始计算值")
 
     def _init_camera(self):
-        self.cap = cv2.VideoCapture(0)
+        self.get_logger().info("正在检测可用的相机设备...")
+        
+        available_cameras = []
+        for i in range(10):
+            cap = cv2.VideoCapture(i)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret:
+                    available_cameras.append(i)
+                    self.get_logger().info(f"找到相机设备: /dev/video{i}")
+                cap.release()
+        
+        if not available_cameras:
+            self.get_logger().error("未找到可用的相机设备！请检查：")
+            self.get_logger().error("1. 相机是否正确连接")
+            self.get_logger().error("2. 相机权限是否正确（可能需要sudo）")
+            self.get_logger().error("3. 相机是否被其他程序占用")
+            return
+        
+        camera_index = available_cameras[0]
+        self.get_logger().info(f"使用相机索引: {camera_index}")
+        
+        self.cap = cv2.VideoCapture(camera_index)
         if not self.cap.isOpened():
-            self.get_logger().error("无法打开相机")
+            self.get_logger().error(f"无法打开相机索引 {camera_index}")
             return
 
         ret, frame = self.cap.read()
@@ -173,6 +199,7 @@ class ArucoDetectorROS2(Node):
             self.new_camera_matrix, (w, h), 5)
 
         self.get_logger().info(f"相机已初始化，分辨率: {w}x{h}")
+        self.camera_initialized = True
 
     def vehicle_attitude_callback(self, vehicle_attitude):
         self.vehicle_attitude = vehicle_attitude
@@ -265,6 +292,9 @@ class ArucoDetectorROS2(Node):
         return yaw
 
     def timer_callback(self):
+        if not self.camera_initialized:
+            return
+
         if not self.cap.isOpened():
             self.get_logger().warn("相机未打开")
             return
