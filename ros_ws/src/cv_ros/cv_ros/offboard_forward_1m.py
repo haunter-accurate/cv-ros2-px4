@@ -135,13 +135,13 @@ class OffboardForward1m(Node):
         
         msg = TrajectorySetpoint()
         msg.position = [limited_x, limited_y, limited_z]
-        msg.yaw = 1.57079  # (90度) - 偏航角
+        msg.yaw = 1.57079  # (90度) - 偏航角，用于测试offboard指令是否生效
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.trajectory_setpoint_publisher.publish(msg)
         
         # 只在首次发布时记录日志，避免过于频繁的日志输出
         if not hasattr(self, 'position_logged') and not self.headless:
-            self.get_logger().info(f"正在发布位置设定点 {[limited_x, limited_y, limited_z]}")
+            self.get_logger().info(f"正在发布位置设定点: X={limited_x:.2f}, Y={limited_y:.2f}, Z={limited_z:.2f}, Yaw=90.0°")
             self.position_logged = True
     
     def apply_speed_limits(self, target_x, target_y, target_z):
@@ -228,20 +228,15 @@ class OffboardForward1m(Node):
         # 发布offboard控制模式心跳信号（无论是否在OFFBOARD模式）
         self.publish_offboard_control_heartbeat_signal()
 
-        # 记录当前控制模式和解锁状态（仅在非headless模式下）
+        # 记录当前控制模式（仅在非headless模式下）
         if self.offboard_setpoint_counter % 10 == 0 and not self.headless:
             is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') else False
-            is_armed = self.vehicle_status.arming_state == self.vehicle_status.ARMING_STATE_ARMED if hasattr(self.vehicle_status, 'arming_state') else False
             altitude = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "未知"
-            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 解锁状态: {is_armed}, 高度: {altitude}")
+            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 高度: {altitude}")
 
         # 检查是否处于OFFBOARD模式
         is_offboard = hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') and \
                      self.vehicle_control_mode.flag_control_offboard_enabled
-        
-        # 检查是否已经解锁
-        is_armed = hasattr(self.vehicle_status, 'arming_state') and \
-                   self.vehicle_status.arming_state == self.vehicle_status.ARMING_STATE_ARMED
         
         # 处理offboard模式计时逻辑
         if is_offboard:
