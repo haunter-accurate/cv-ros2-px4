@@ -24,7 +24,7 @@ sudo MicroXRCEAgent serial --dev /dev/ttyAMA0 -b 921600
 source ~/cv-ros2-px4/ros_ws/install/setup.bash
 ```
 
-### 4. 启动色块识别节点
+### 4. 启动色块识别节点/启动aruco码识别节点
 启动红色色块检测节点，用于识别摄像头中的红色物体：
 
 ```bash
@@ -38,12 +38,18 @@ python ~/cv-ros2-px4/ros_ws/src/cv_ros/cv_ros/red_color_detector_ros2.py --ros-a
 - `camera_id`: 摄像头设备ID（默认为0）
 - `publish_rate`: 检测结果发布频率（Hz）
 - `headless`: 是否启用无头模式（不显示图像界面）
-
-### 5. 启动色块跟踪节点
+```bash
+python ~/cv-ros2-px4/ros_ws/src/cv_ros/cv_ros/aruco_detector_ros2.py
+```
+### 5. 启动色块跟踪节点/启动aruco码跟踪节点
 启动颜色跟踪Offboard控制节点，用于控制无人机跟踪识别到的红色物体：
 
 ```bash
 python ~/cv-ros2-px4/ros_ws/src/cv_ros/cv_ros/color_tracking_offboard.py
+```
+
+```bash
+python ~/cv-ros2-px4/ros_ws/src/cv_ros/cv_ros/aruco_tracking_offboard.py
 ```
 
 ### 6. 启动GPS位置发布节点
