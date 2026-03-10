@@ -147,26 +147,27 @@ class ArucoPositionTrackingOffboard(Node):
 
     def publish_offboard_control_heartbeat_signal(self):
         msg = OffboardControlMode()
-        msg.position = True
-        msg.velocity = False
-        msg.acceleration = False
+        msg.position = False
+        msg.velocity = True
+        msg.acceleration = True
         msg.attitude = False
         msg.body_rate = False
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.offboard_control_mode_publisher.publish(msg)
         
         if self.offboard_setpoint_counter % 10 == 0:
-            self.get_logger().info(f"发布Offboard控制模式: position=True")
+            self.get_logger().info(f"发布Offboard控制模式: velocity=True, acceleration=True")
 
-    def publish_position_setpoint(self, x: float, y: float, z: float, yaw: float):
+    def publish_velocity_setpoint(self, vx: float, vy: float, vz: float, ax: float, ay: float, az: float, yaw: float):
         msg = TrajectorySetpoint()
-        msg.position = [x, y, z]
+        msg.velocity = [vx, vy, vz]
+        msg.acceleration = [ax, ay, az]
         msg.yaw = yaw
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.trajectory_setpoint_publisher.publish(msg)
         
         if self.offboard_setpoint_counter % 10 == 0:
-            self.get_logger().info(f"发布位置设定点: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, Yaw={math.degrees(yaw):.1f}°")
+            self.get_logger().info(f"发布速度设定点: VX={vx:.2f}, VY={vy:.2f}, VZ={vz:.2f}, AX={ax:.2f}, AY={ay:.2f}, AZ={az:.2f}, Yaw={math.degrees(yaw):.1f}°")
 
     def publish_vehicle_command(self, command, **params) -> None:
         msg = VehicleCommand()
@@ -186,8 +187,8 @@ class ArucoPositionTrackingOffboard(Node):
         msg.timestamp = int(self.get_clock().now().nanoseconds / 1000)
         self.vehicle_command_publisher.publish(msg)
 
-    def apply_speed_limits(self, target_x, target_y, target_z):
-        """应用速度限制，确保移动速度不超过设定值"""
+    def calculate_velocity_command(self, target_x, target_y, target_z):
+        """根据目标位置计算速度和加速度命令"""
         dx = target_x - self.vehicle_local_position.x
         dy = target_y - self.vehicle_local_position.y
         dz = target_z - self.vehicle_local_position.z
@@ -195,22 +196,58 @@ class ArucoPositionTrackingOffboard(Node):
         horizontal_distance = (dx**2 + dy**2)**0.5
         vertical_distance = abs(dz)
         
-        max_horizontal_move = self.max_horizontal_speed * 0.1
-        max_vertical_move = self.max_vertical_speed * 0.1
+        if horizontal_distance < self.position_tolerance:
+            target_vx = 0.0
+            target_vy = 0.0
+        else:
+            target_vx = dx * self.position_filter_alpha
+            target_vy = dy * self.position_filter_alpha
+            
+            if horizontal_distance > self.max_horizontal_speed:
+                scale = self.max_horizontal_speed / horizontal_distance
+                target_vx *= scale
+                target_vy *= scale
         
-        if horizontal_distance > max_horizontal_move:
-            scale = max_horizontal_move / horizontal_distance
-            dx *= scale
-            dy *= scale
+        if vertical_distance < self.position_tolerance:
+            target_vz = 0.0
+        else:
+            target_vz = dz * self.position_filter_alpha
+            
+            if abs(target_vz) > self.max_vertical_speed:
+                target_vz = math.copysign(self.max_vertical_speed, target_vz)
         
-        if vertical_distance > max_vertical_move:
-            dz = math.copysign(max_vertical_move, dz)
+        dt = 0.1
         
-        limited_x = self.vehicle_local_position.x + dx
-        limited_y = self.vehicle_local_position.y + dy
-        limited_z = self.vehicle_local_position.z + dz
+        ax = (target_vx - self.last_velocity[0]) / dt
+        ay = (target_vy - self.last_velocity[1]) / dt
+        az = (target_vz - self.last_velocity[2]) / dt
         
-        return limited_x, limited_y, limited_z
+        horizontal_accel = (ax**2 + ay**2)**0.5
+        
+        if horizontal_accel > self.max_horizontal_accel:
+            scale = self.max_horizontal_accel / horizontal_accel
+            ax *= scale
+            ay *= scale
+        
+        if abs(az) > self.max_vertical_accel:
+            az = math.copysign(self.max_vertical_accel, az)
+        
+        vx = self.last_velocity[0] + ax * dt
+        vy = self.last_velocity[1] + ay * dt
+        vz = self.last_velocity[2] + az * dt
+        
+        horizontal_speed = (vx**2 + vy**2)**0.5
+        if horizontal_speed > self.max_horizontal_speed:
+            scale = self.max_horizontal_speed / horizontal_speed
+            vx *= scale
+            vy *= scale
+        
+        if abs(vz) > self.max_vertical_speed:
+            vz = math.copysign(self.max_vertical_speed, vz)
+        
+        self.last_velocity = [vx, vy, vz]
+        
+        return vx, vy, vz, ax, ay, az
 
     def timer_callback(self) -> None:
         self.publish_offboard_control_heartbeat_signal()
@@ -263,9 +300,9 @@ class ArucoPositionTrackingOffboard(Node):
                 new_z = self.filtered_target_position[2]
                 new_yaw = self.current_yaw
                 
-                limited_x, limited_y, limited_z = self.apply_speed_limits(new_x, new_y, new_z)
+                vx, vy, vz, ax, ay, az = self.calculate_velocity_command(new_x, new_y, new_z)
                 
-                self.publish_position_setpoint(limited_x, limited_y, limited_z, new_yaw)
+                self.publish_velocity_setpoint(vx, vy, vz, ax, ay, az, new_yaw)
                 
                 distance_to_target = ((self.vehicle_local_position.x - target_x) ** 2 +
                                      (self.vehicle_local_position.y - target_y) ** 2 +
@@ -277,19 +314,24 @@ class ArucoPositionTrackingOffboard(Node):
                         f"目标: ({target_x:.2f}, {target_y:.2f}, {target_z:.2f})m, "
                         f"当前: ({self.vehicle_local_position.x:.2f}, {self.vehicle_local_position.y:.2f}, {self.vehicle_local_position.z:.2f})m, "
                         f"误差: {distance_to_target:.3f}m, "
+                        f"速度: ({vx:.2f}, {vy:.2f}, {vz:.2f})m/s, "
+                        f"加速度: ({ax:.2f}, {ay:.2f}, {az:.2f})m/s², "
                         f"当前Yaw: {math.degrees(self.current_yaw):.1f}°"
                     )
             else:
-                self.get_logger().warn("未检测到ArUco码，保持当前位置和朝向")
-                limited_x, limited_y, limited_z = self.apply_speed_limits(
+                self.get_logger().warn("未检测到ArUco码，悬停")
+                vx, vy, vz, ax, ay, az = self.calculate_velocity_command(
                     self.vehicle_local_position.x,
                     self.vehicle_local_position.y,
                     self.vehicle_local_position.z
                 )
-                self.publish_position_setpoint(
-                    limited_x,
-                    limited_y,
-                    limited_z,
+                self.publish_velocity_setpoint(
+                    vx,
+                    vy,
+                    vz,
+                    ax,
+                    ay,
+                    az,
                     self.current_yaw
                 )
         elif is_offboard:
