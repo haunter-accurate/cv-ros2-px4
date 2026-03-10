@@ -156,31 +156,15 @@ class ArucoDetectorROS2(Node):
             self.get_logger().info("未找到距离标定参数，使用原始计算值")
 
     def _init_camera(self):
-        self.get_logger().info("正在检测可用的相机设备...")
+        self.get_logger().info("正在初始化相机设备...")
         
-        available_cameras = []
-        for i in range(10):
-            cap = cv2.VideoCapture(i-1)
-            if cap.isOpened():
-                ret, frame = cap.read()
-                if ret:
-                    available_cameras.append(i-1)
-                    self.get_logger().info(f"找到相机设备: /dev/video{i-1}")
-                cap.release()
-        
-        if not available_cameras:
-            self.get_logger().error("未找到可用的相机设备！请检查：")
+        self.cap = cv2.VideoCapture(0)
+        if not self.cap.isOpened():
+            self.get_logger().error("无法打开相机索引 0")
+            self.get_logger().error("请检查：")
             self.get_logger().error("1. 相机是否正确连接")
             self.get_logger().error("2. 相机权限是否正确（可能需要sudo）")
             self.get_logger().error("3. 相机是否被其他程序占用")
-            return
-        
-        camera_index = available_cameras[0]
-        self.get_logger().info(f"使用相机索引: {camera_index}")
-        
-        self.cap = cv2.VideoCapture(camera_index)
-        if not self.cap.isOpened():
-            self.get_logger().error(f"无法打开相机索引 {camera_index}")
             return
 
         ret, frame = self.cap.read()
