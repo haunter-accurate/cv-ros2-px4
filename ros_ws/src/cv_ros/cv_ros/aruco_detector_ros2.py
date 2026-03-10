@@ -160,12 +160,12 @@ class ArucoDetectorROS2(Node):
         
         available_cameras = []
         for i in range(10):
-            cap = cv2.VideoCapture(i)
+            cap = cv2.VideoCapture(i-1)
             if cap.isOpened():
                 ret, frame = cap.read()
                 if ret:
-                    available_cameras.append(i)
-                    self.get_logger().info(f"找到相机设备: /dev/video{i}")
+                    available_cameras.append(i-1)
+                    self.get_logger().info(f"找到相机设备: /dev/video{i-1}")
                 cap.release()
         
         if not available_cameras:
