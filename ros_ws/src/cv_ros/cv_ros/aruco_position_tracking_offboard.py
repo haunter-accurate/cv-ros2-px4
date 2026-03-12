@@ -53,6 +53,8 @@ class ArucoPositionTrackingOffboard(Node):
         self.declare_parameter('position_filter_alpha', 0.3)
         self.declare_parameter('max_horizontal_speed', 0.5)
         self.declare_parameter('max_vertical_speed', 0.3)
+        self.declare_parameter('max_horizontal_accel', 1.0)
+        self.declare_parameter('max_vertical_accel', 0.5)
 
         self.offboard_maintain_time = self.get_parameter('offboard_maintain_time').value
         self.target_offset_x = self.get_parameter('target_offset_x').value
@@ -62,6 +64,8 @@ class ArucoPositionTrackingOffboard(Node):
         self.position_filter_alpha = self.get_parameter('position_filter_alpha').value
         self.max_horizontal_speed = self.get_parameter('max_horizontal_speed').value
         self.max_vertical_speed = self.get_parameter('max_vertical_speed').value
+        self.max_horizontal_accel = self.get_parameter('max_horizontal_accel').value
+        self.max_vertical_accel = self.get_parameter('max_vertical_accel').value
 
         self.offboard_setpoint_counter = 0
         self.vehicle_local_position = VehicleLocalPosition()
@@ -79,12 +83,14 @@ class ArucoPositionTrackingOffboard(Node):
 
         self.current_yaw = 0.0
         self.filtered_target_position = [0.0, 0.0, 0.0]
+        self.last_velocity = [0.0, 0.0, 0.0]
 
         self.get_logger().info(f"参数配置: offboard_maintain_time={self.offboard_maintain_time}s")
         self.get_logger().info(f"目标偏移: X={self.target_offset_x}m, Y={self.target_offset_y}m, Z={self.target_offset_z}m")
         self.get_logger().info(f"目标位置: 在ArUco码正上方{abs(self.target_offset_z)}m")
         self.get_logger().info(f"位置滤波系数: {self.position_filter_alpha}")
         self.get_logger().info(f"速度限制: 水平={self.max_horizontal_speed}m/s, 垂直={self.max_vertical_speed}m/s")
+        self.get_logger().info(f"加速度限制: 水平={self.max_horizontal_accel}m/s², 垂直={self.max_vertical_accel}m/s²")
 
         self.timer = self.create_timer(0.1, self.timer_callback)
 
