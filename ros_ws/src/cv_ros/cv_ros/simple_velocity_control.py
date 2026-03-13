@@ -58,7 +58,7 @@ class SimpleVelocityControl(Node):
         self.get_logger().info(f"速度控制节点已启动")
         self.get_logger().info(f"速度限制: 水平={self.max_horizontal_speed}m/s, 垂直={self.max_vertical_speed}m/s")
 
-        self.timer = self.create_timer(0.1, self.timer_callback)
+        self.timer = self.create_timer(0.02, self.timer_callback)
 
     def vehicle_control_mode_callback(self, vehicle_control_mode):
         self.vehicle_control_mode = vehicle_control_mode
@@ -112,7 +112,7 @@ class SimpleVelocityControl(Node):
         is_armed = hasattr(self.vehicle_status, 'arming_state') and \
                    self.vehicle_status.arming_state == self.vehicle_status.ARMING_STATE_ARMED
 
-        if self.offboard_setpoint_counter % 10 == 0:
+        if self.offboard_setpoint_counter % 50 == 0:
             self.get_logger().info(
                 f"OFFBOARD: {is_offboard}, ARMED: {is_armed}, "
                 f"速度模式: {self.velocity_mode_enabled}, "
@@ -128,12 +128,12 @@ class SimpleVelocityControl(Node):
 
             self.publish_velocity_setpoint(vx, vy, vz, self.current_yaw)
 
-            if self.offboard_setpoint_counter % 10 == 0:
+            if self.offboard_setpoint_counter % 50 == 0:
                 self.get_logger().info(
                     f"发布速度命令: VX={vx:.2f}, VY={vy:.2f}, VZ={vz:.2f}m/s, Yaw={math.degrees(self.current_yaw):.1f}°"
                 )
         else:
-            if self.offboard_setpoint_counter % 10 == 0:
+            if self.offboard_setpoint_counter % 50 == 0:
                 if not is_offboard:
                     self.get_logger().info("未处于OFFBOARD模式，不发布速度命令")
                 elif not self.velocity_mode_enabled:
