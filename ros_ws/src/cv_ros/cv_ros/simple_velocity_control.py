@@ -53,8 +53,8 @@ class SimpleVelocityControl(Node):
 
         self.velocity_mode_enabled = False
         self.current_yaw = 0.0
-
         self.offboard_setpoint_counter = 0
+        self.last_velocity_mode_enabled = False
 
         self.get_logger().info(f"速度控制节点已启动")
         self.get_logger().info(f"速度限制: 水平={self.max_horizontal_speed}m/s, 垂直={self.max_vertical_speed}m/s")
@@ -119,6 +119,12 @@ class SimpleVelocityControl(Node):
                 f"速度模式: {self.velocity_mode_enabled}, "
                 f"输入速度: ({self.velocity_command.x:.2f}, {self.velocity_command.y:.2f}, {self.velocity_command.z:.2f})m/s"
             )
+
+        if self.last_velocity_mode_enabled and not self.velocity_mode_enabled:
+            self.publish_velocity_setpoint(0.0, 0.0, 0.0, self.current_yaw)
+            self.get_logger().info("速度控制模式从启用变为禁用，发布零速度命令")
+
+        self.last_velocity_mode_enabled = self.velocity_mode_enabled
 
         if is_offboard and self.velocity_mode_enabled:
             vx, vy, vz = self.limit_velocity(

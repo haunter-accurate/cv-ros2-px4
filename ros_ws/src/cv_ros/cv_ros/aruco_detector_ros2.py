@@ -99,12 +99,9 @@ class ArucoDetectorROS2(Node):
         self.filtered_position = [0.0, 0.0, 0.0]
         self.filtered_yaw = 0.0
         self.last_valid_data = None
-        self.consecutive_loss_count = 0
-        self.max_consecutive_loss = 2
 
         self.last_detection_time = None
         self.last_publish_time = None
-        self.max_detection_interval = 1.0
 
         self.last_log_time = None
         self.log_interval = 1.0
@@ -398,16 +395,12 @@ class ArucoDetectorROS2(Node):
             time_interval_msg.data = time_interval
             self.aruco_time_interval_publisher.publish(time_interval_msg)
         else:
-            if self.last_publish_time is not None:
-                time_since_last_publish = (current_time - self.last_publish_time).nanoseconds / 1e9
-                if time_since_last_publish >= self.max_detection_interval:
-                    self.get_logger().warn(f"连续{time_since_last_publish:.1f}秒未检测到目标，发送丢失消息")
-                    self.last_publish_time = None
-                    self.last_valid_data = None
+            self.get_logger().warn("未检测到目标，发送丢失消息")
+            self.last_valid_data = None
 
-                    detected_msg = Bool()
-                    detected_msg.data = False
-                    self.aruco_detected_publisher.publish(detected_msg)
+            detected_msg = Bool()
+            detected_msg.data = False
+            self.aruco_detected_publisher.publish(detected_msg)
 
     def destroy_node(self):
         if hasattr(self, 'cap') and self.cap.isOpened():
