@@ -4,7 +4,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleControlMode, VehicleStatus
-from geometry_msgs.msg import Vector3, Bool
+from geometry_msgs.msg import Vector3
+from std_msgs.msg import Bool
 import math
 
 
