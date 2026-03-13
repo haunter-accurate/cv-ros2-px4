@@ -401,8 +401,7 @@ class GpsTargetTracker(Node):
                     self.get_logger().info("已退出offboard模式，重置状态")
 
         # 更新计数器
-        if self.offboard_setpoint_counter < 100:
-            self.offboard_setpoint_counter += 1
+        self.offboard_setpoint_counter += 1
 
     def destroy_node(self):
         """节点销毁时的清理工作。"""

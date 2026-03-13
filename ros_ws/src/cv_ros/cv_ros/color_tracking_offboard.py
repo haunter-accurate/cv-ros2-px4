@@ -302,8 +302,7 @@ class ColorTrackingOffboard(Node):
             self.get_logger().info("未处于OFFBOARD模式，等待遥控器切换")
 
         # 更新计数器
-        if self.offboard_setpoint_counter < 100:
-            self.offboard_setpoint_counter += 1
+        self.offboard_setpoint_counter += 1
 
     def destroy_node(self):
         """节点销毁时的清理工作。"""
