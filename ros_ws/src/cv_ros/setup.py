@@ -35,6 +35,7 @@ setup(
             'aruco_tracking_offboard = cv_ros.aruco_tracking_offboard:main',
             'aruco_position_tracking_offboard = cv_ros.aruco_position_tracking_offboard:main',
             'simple_velocity_control = cv_ros.simple_velocity_control:main',
+            'velocity_control_test = cv_ros.velocity_control_test:main',
         ],
     },
 )
