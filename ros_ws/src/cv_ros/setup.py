@@ -37,6 +37,7 @@ setup(
             'simple_velocity_control = cv_ros.simple_velocity_control:main',
             'velocity_control_test = cv_ros.velocity_control_test:main',
             'aruco_cbtracking = cv_ros.aruco_cbtracking:main',
+            'laser_height_test = cv_ros.laser_height_test:main',
         ],
     },
 )
