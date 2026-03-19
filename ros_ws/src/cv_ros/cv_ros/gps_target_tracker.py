@@ -53,7 +53,7 @@ class GpsTargetTracker(Node):
         self.declare_parameter('headless', False)  # 是否启用headless模式
         self.declare_parameter('enable_control', True)  # 是否启用控制（默认启用）
         self.declare_parameter('offboard_wait_time', 2.0)  # 进入offboard模式后等待时间（秒）
-        self.declare_parameter('socket_host', '10.5.211.119')  # Socket监听主机
+        self.declare_parameter('socket_host', '192.168.43.175')  # Socket监听主机
         self.declare_parameter('socket_port', 5000)  # Socket监听端口
         self.declare_parameter('south_distance', 2.0)  # 向南移动距离（米）
         self.declare_parameter('altitude_offset', 2.0)  # 高度偏移（米）
