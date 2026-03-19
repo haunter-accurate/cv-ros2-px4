@@ -51,6 +51,7 @@ class GpsTargetTracker(Node):
 
         # 参数配置
         self.declare_parameter('headless', False)  # 是否启用headless模式
+        self.declare_parameter('enable_control', True)  # 是否启用控制（默认启用）
         self.declare_parameter('offboard_wait_time', 2.0)  # 进入offboard模式后等待时间（秒）
         self.declare_parameter('socket_host', '10.5.211.119')  # Socket监听主机
         self.declare_parameter('socket_port', 5000)  # Socket监听端口
@@ -61,6 +62,7 @@ class GpsTargetTracker(Node):
         
         # 获取参数
         self.headless = self.get_parameter('headless').value
+        self.enable_control = self.get_parameter('enable_control').value
         self.offboard_wait_time = self.get_parameter('offboard_wait_time').value
         self.socket_host = self.get_parameter('socket_host').value
         self.socket_port = self.get_parameter('socket_port').value
@@ -89,10 +91,12 @@ class GpsTargetTracker(Node):
         # 输出初始化信息
         if not self.headless:
             self.get_logger().info("GPS目标位置跟踪器 启动")
-            self.get_logger().info(f"参数配置: headless={self.headless}, offboard_wait_time={self.offboard_wait_time}秒")
+            self.get_logger().info(f"参数配置: headless={self.headless}, enable_control={self.enable_control}, offboard_wait_time={self.offboard_wait_time}秒")
             self.get_logger().info(f"Socket配置: {self.socket_host}:{self.socket_port}")
             self.get_logger().info(f"目标位置偏移: 南方{self.south_distance}米, 高度+{self.altitude_offset}米")
             self.get_logger().info(f"速度限制: 水平最大{self.max_horizontal_velocity}米/秒, 垂直最大{self.max_vertical_velocity}米/秒")
+            if not self.enable_control:
+                self.get_logger().warn("控制已禁用，仅输出期望移动距离，不发布控制指令")
             self.get_logger().info("正在等待GPS坐标数据...")
 
         # 创建定时器
@@ -271,6 +275,18 @@ class GpsTargetTracker(Node):
         # 转换目标GPS坐标为NED坐标
         ned_x, ned_y, ned_z = self.gps_to_ned(target_lat, target_lon, target_alt, ref_lat, ref_lon, ref_alt)
         
+        # 计算水平距离
+        horizontal_distance = math.sqrt(ned_x**2 + ned_y**2)
+        # 计算垂直距离
+        vertical_distance = abs(ned_z)
+        
+        # 如果控制未启用，只输出期望移动距离
+        if not self.enable_control:
+            if not self.headless:
+                self.get_logger().info(f"期望移动距离: X={ned_x:.2f}m, Y={ned_y:.2f}m, Z={ned_z:.2f}m (测试模式，未发布控制指令)")
+                self.get_logger().info(f"目标GPS位置: lat={target_lat}, lon={target_lon}, alt={target_alt}")
+            return
+        
         # 创建TrajectorySetpoint消息
         trajectory_msg = TrajectorySetpoint()
         
@@ -280,10 +296,6 @@ class GpsTargetTracker(Node):
         trajectory_msg.z = ned_z  # 天方向（负号表示向下）
         
         # 计算速度向量（基于目标位置和当前位置的差值）
-        # 计算水平距离
-        horizontal_distance = math.sqrt(ned_x**2 + ned_y**2)
-        # 计算垂直距离
-        vertical_distance = abs(ned_z)
         
         # 计算速度向量
         if horizontal_distance > 0.1:  # 避免除以零
@@ -324,14 +336,40 @@ class GpsTargetTracker(Node):
 
     def timer_callback(self) -> None:
         """定时器的回调函数。"""
-        # 发布offboard控制模式心跳信号（无论是否在OFFBOARD模式）
-        self.publish_offboard_control_heartbeat_signal()
+        # 发布offboard控制模式心跳信号（仅在启用控制时）
+        if self.enable_control:
+            self.publish_offboard_control_heartbeat_signal()
 
         # 记录当前控制模式和高度（仅在非headless模式下）
         if self.offboard_setpoint_counter % 10 == 0 and not self.headless:
             is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') else False
             altitude = self.vehicle_global_position.alt if hasattr(self.vehicle_global_position, 'alt') else "未知"
-            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 高度: {altitude}")
+            control_status = "启用" if self.enable_control else "禁用"
+            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 高度: {altitude}, 控制状态: {control_status}")
+
+        # 如果控制未启用，只输出期望移动距离，不进行offboard控制逻辑
+        if not self.enable_control:
+            # 检查是否接收到GPS坐标
+            if not self.received_gps_position:
+                if not self.headless and rclpy.ok():
+                    # 每5秒输出一次，避免日志过多
+                    if not hasattr(self, 'last_no_gps_log') or (self.get_clock().now() - self.last_no_gps_log).nanoseconds / 1e9 > 5:
+                        self.get_logger().info("等待GPS坐标数据...")
+                        self.last_no_gps_log = self.get_clock().now()
+                return
+            
+            # 检查是否接收到本机GPS位置
+            if not self.vehicle_global_position_received:
+                if not self.headless and rclpy.ok():
+                    # 每5秒输出一次，避免日志过多
+                    if not hasattr(self, 'last_no_local_gps_log') or (self.get_clock().now() - self.last_no_local_gps_log).nanoseconds / 1e9 > 5:
+                        self.get_logger().info("等待本机GPS位置数据...")
+                        self.last_no_local_gps_log = self.get_clock().now()
+                return
+            
+            # 发布期望移动距离（不发布控制指令）
+            self.publish_target_position()
+            return
 
         # 检查是否接收到GPS坐标
         if not self.received_gps_position:
