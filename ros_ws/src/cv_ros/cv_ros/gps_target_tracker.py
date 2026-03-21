@@ -292,9 +292,12 @@ class GpsTargetTracker(Node):
             if not self.headless:
                 # 获取本地位置z值作为对比
                 local_z = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "N/A"
+                local_x = self.vehicle_local_position.x if hasattr(self.vehicle_local_position, 'x') else "N/A"
+                local_y = self.vehicle_local_position.y if hasattr(self.vehicle_local_position, 'y') else "N/A"
                 self.get_logger().info(f"期望移动距离: X={ned_x:.2f}m, Y={ned_y:.2f}m, Z={ned_z:.2f}m (测试模式，未发布控制指令)")
                 self.get_logger().info(f"目标GPS位置: lat={target_lat}, lon={target_lon}, alt={target_alt}")
-                self.get_logger().info(f"高度对比: GPS高度={ref_alt:.3f}m, 本地位置z={local_z}m")
+                self.get_logger().info(f"本机GPS位置: lat={ref_lat}, lon={ref_lon}, alt={ref_alt:.3f}m")
+                self.get_logger().info(f"本机本地位置: x={local_x}m, y={local_y}m, z={local_z}m")
             return
         
         # 创建TrajectorySetpoint消息
