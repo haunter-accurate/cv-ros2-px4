@@ -267,6 +267,11 @@ class GpsTargetTracker(Node):
         y = delta_lon * self.earth_radius * math.cos(ref_lat_rad)  # 东方向
         z = ref_alt - alt  # 天方向（负号表示向下）
         
+        # 添加调试日志
+        if not self.headless and self.offboard_setpoint_counter % 50 == 0:
+            self.get_logger().info(f"GPS到NED转换: delta_lat={delta_lat:.9f}, delta_lon={delta_lon:.9f}")
+            self.get_logger().info(f"GPS到NED转换: ref_alt={ref_alt:.3f}, alt={alt:.3f}, z={z:.3f}")
+        
         return x, y, z
 
     def publish_target_position(self):

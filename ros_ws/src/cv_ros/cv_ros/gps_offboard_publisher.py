@@ -103,12 +103,14 @@ class GpsOffboardPublisher(Node):
         lat_lon_valid = getattr(self.vehicle_global_position, 'lat_lon_valid', False)
         z_valid = getattr(self.vehicle_local_position, 'z_valid', False)
         
-        # 使用本地位置的z值作为高度
-        altitude = self.vehicle_local_position.z
+        # 经纬度使用GPS数据，高度使用本地位置（激光更可信）
+        # 本地位置z在NED坐标系中负值表示向上，取绝对值作为高度
+        altitude = abs(self.vehicle_local_position.z)
         
         if not self.headless:
             self.get_logger().info(f"数据有效性: lat_lon_valid={lat_lon_valid}, z_valid={z_valid}")
-            self.get_logger().info(f"GPS坐标: lat={self.vehicle_global_position.lat}, lon={self.vehicle_global_position.lon}, 高度(本地z)={altitude:.3f}m")
+            self.get_logger().info(f"GPS坐标: lat={self.vehicle_global_position.lat}, lon={self.vehicle_global_position.lon}")
+            self.get_logger().info(f"本地位置z: {self.vehicle_local_position.z:.3f}m, 发送高度: {altitude:.3f}m")
         
         # 准备GPS数据
         gps_data = {
