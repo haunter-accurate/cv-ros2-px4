@@ -12,7 +12,7 @@ ros2 run cv_ros gps_target_tracker
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import VehicleControlMode, TrajectorySetpoint, VehicleGlobalPosition, OffboardControlMode, VehicleCommand
+from px4_msgs.msg import VehicleControlMode, TrajectorySetpoint, VehicleGlobalPosition, VehicleLocalPosition, OffboardControlMode, VehicleCommand
 import socket
 import json
 import threading
@@ -40,6 +40,8 @@ class GpsTargetTracker(Node):
         # 订阅本机GPS位置
         self.vehicle_global_position_subscriber = self.create_subscription(
             VehicleGlobalPosition, '/fmu/out/vehicle_global_position', self.vehicle_global_position_callback, qos_profile)
+        self.vehicle_local_position_subscriber = self.create_subscription(
+            VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
 
         # 创建发布者
         self.offboard_control_mode_publisher = self.create_publisher(
@@ -75,10 +77,12 @@ class GpsTargetTracker(Node):
         self.offboard_setpoint_counter = 0
         self.vehicle_control_mode = VehicleControlMode()
         self.vehicle_global_position = VehicleGlobalPosition()  # 本机GPS位置
+        self.vehicle_local_position = VehicleLocalPosition()  # 本机本地位置
         self.offboard_entry_time = None  # 记录进入offboard模式的时间
         self.offboard_mode_detected = False  # 标记是否检测到offboard模式
         self.target_position_active = False  # 标记目标位置是否激活
         self.vehicle_global_position_received = False  # 标记是否接收到本机GPS位置
+        self.vehicle_local_position_received = False  # 标记是否接收到本地位置数据
         
         # GPS坐标相关变量
         self.received_gps_position = None  # 接收到的GPS坐标
@@ -117,6 +121,14 @@ class GpsTargetTracker(Node):
             self.vehicle_global_position_received = True
             if not self.headless:
                 self.get_logger().info("✓ 已接收到本机GPS位置数据")
+
+    def vehicle_local_position_callback(self, vehicle_local_position):
+        """vehicle_local_position话题订阅者的回调函数。"""
+        self.vehicle_local_position = vehicle_local_position
+        if not self.vehicle_local_position_received:
+            self.vehicle_local_position_received = True
+            if not self.headless:
+                self.get_logger().info("✓ 已接收到本地位置数据")
 
     def publish_offboard_control_heartbeat_signal(self):
         """发布offboard控制模式。"""
@@ -278,8 +290,11 @@ class GpsTargetTracker(Node):
         # 如果控制未启用，只输出期望移动距离
         if not self.enable_control:
             if not self.headless:
+                # 获取本地位置z值作为对比
+                local_z = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "N/A"
                 self.get_logger().info(f"期望移动距离: X={ned_x:.2f}m, Y={ned_y:.2f}m, Z={ned_z:.2f}m (测试模式，未发布控制指令)")
                 self.get_logger().info(f"目标GPS位置: lat={target_lat}, lon={target_lon}, alt={target_alt}")
+                self.get_logger().info(f"高度对比: GPS高度={ref_alt:.3f}m, 本地位置z={local_z}m")
             return
         
         # 创建TrajectorySetpoint消息
@@ -308,8 +323,12 @@ class GpsTargetTracker(Node):
         self.trajectory_setpoint_publisher.publish(trajectory_msg)
         
         if not self.headless:
+            # 获取本地位置z值作为对比
+            local_z = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "N/A"
             self.get_logger().info(f"发布目标位置: x={ned_x:.2f}m, y={ned_y:.2f}m, z={ned_z:.2f}m")
             self.get_logger().info(f"目标GPS位置: lat={target_lat}, lon={target_lon}, alt={target_alt}")
+            self.get_logger().info(f"本机GPS位置: lat={ref_lat}, lon={ref_lon}, alt={ref_alt:.3f}m")
+            self.get_logger().info(f"本机本地位置: x={self.vehicle_local_position.x:.2f}m, y={self.vehicle_local_position.y:.2f}m, z={local_z}m")
 
     def timer_callback(self) -> None:
         """定时器的回调函数。"""
@@ -320,9 +339,10 @@ class GpsTargetTracker(Node):
         # 记录当前控制模式和高度（仅在非headless模式下）
         if self.offboard_setpoint_counter % 10 == 0 and not self.headless:
             is_offboard = self.vehicle_control_mode.flag_control_offboard_enabled if hasattr(self.vehicle_control_mode, 'flag_control_offboard_enabled') else False
-            altitude = self.vehicle_global_position.alt if hasattr(self.vehicle_global_position, 'alt') else "未知"
+            gps_alt = self.vehicle_global_position.alt if hasattr(self.vehicle_global_position, 'alt') else "未知"
+            local_z = self.vehicle_local_position.z if hasattr(self.vehicle_local_position, 'z') else "未知"
             control_status = "启用" if self.enable_control else "禁用"
-            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, 高度: {altitude}, 控制状态: {control_status}")
+            self.get_logger().info(f"OFFBOARD模式: {is_offboard}, GPS高度: {gps_alt}m, 本地位置z: {local_z}m, 控制状态: {control_status}")
 
         # 如果控制未启用，只输出期望移动距离，不进行offboard控制逻辑
         if not self.enable_control:
@@ -342,6 +362,15 @@ class GpsTargetTracker(Node):
                     if not hasattr(self, 'last_no_local_gps_log') or (self.get_clock().now() - self.last_no_local_gps_log).nanoseconds / 1e9 > 5:
                         self.get_logger().info("等待本机GPS位置数据...")
                         self.last_no_local_gps_log = self.get_clock().now()
+                return
+            
+            # 检查是否接收到本地位置数据
+            if not self.vehicle_local_position_received:
+                if not self.headless and rclpy.ok():
+                    # 每5秒输出一次，避免日志过多
+                    if not hasattr(self, 'last_no_local_position_log') or (self.get_clock().now() - self.last_no_local_position_log).nanoseconds / 1e9 > 5:
+                        self.get_logger().info("等待本地位置数据...")
+                        self.last_no_local_position_log = self.get_clock().now()
                 return
             
             # 发布期望移动距离（不发布控制指令）
