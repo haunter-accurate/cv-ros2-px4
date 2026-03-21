@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from px4_msgs.msg import VehicleControlMode, VehicleGlobalPosition
+from px4_msgs.msg import VehicleControlMode, VehicleGlobalPosition, VehicleLocalPosition
 import socket
 import json
 
@@ -27,6 +27,8 @@ class GpsOffboardPublisher(Node):
             VehicleControlMode, '/fmu/out/vehicle_control_mode', self.vehicle_control_mode_callback, qos_profile)
         self.vehicle_global_position_subscriber = self.create_subscription(
             VehicleGlobalPosition, '/fmu/out/vehicle_global_position', self.vehicle_global_position_callback, qos_profile)
+        self.vehicle_local_position_subscriber = self.create_subscription(
+            VehicleLocalPosition, '/fmu/out/vehicle_local_position', self.vehicle_local_position_callback, qos_profile)
 
         # 参数配置
         self.declare_parameter('headless', False)  # 是否启用headless模式
@@ -43,9 +45,11 @@ class GpsOffboardPublisher(Node):
         # 初始化变量
         self.vehicle_control_mode = VehicleControlMode()
         self.vehicle_global_position = VehicleGlobalPosition()
+        self.vehicle_local_position = VehicleLocalPosition()
         self.last_published_time = None  # 记录最后发布GPS坐标的时间
         self.publish_interval = 5.0  # GPS坐标发布间隔（秒）
         self.gps_position_received = False  # 标记是否接收到GPS位置数据
+        self.local_position_received = False  # 标记是否接收到本地位置数据
         
         # 输出初始化信息
         if not self.headless:
@@ -70,30 +74,47 @@ class GpsOffboardPublisher(Node):
             if not self.headless:
                 self.get_logger().info("✓ 已接收到GPS位置数据")
 
+    def vehicle_local_position_callback(self, vehicle_local_position):
+        """vehicle_local_position话题订阅者的回调函数。"""
+        self.vehicle_local_position = vehicle_local_position
+        if not self.local_position_received:
+            self.local_position_received = True
+            if not self.headless:
+                self.get_logger().info("✓ 已接收到本地位置数据")
+
     def publish_gps_coordinates(self):
         """通过socket发布GPS坐标。"""
         if not self.headless:
             self.get_logger().info("开始发布GPS坐标...")
         
         # 检查GPS数据是否有效
-        if not hasattr(self.vehicle_global_position, 'lat') or not hasattr(self.vehicle_global_position, 'lon') or not hasattr(self.vehicle_global_position, 'alt'):
+        if not hasattr(self.vehicle_global_position, 'lat') or not hasattr(self.vehicle_global_position, 'lon'):
             if not self.headless:
                 self.get_logger().warn("GPS数据无效，无法发布")
             return
         
+        # 检查本地位置数据是否有效
+        if not hasattr(self.vehicle_local_position, 'z'):
+            if not self.headless:
+                self.get_logger().warn("本地位置数据无效，无法获取高度")
+            return
+        
         # 检查GPS坐标有效性
         lat_lon_valid = getattr(self.vehicle_global_position, 'lat_lon_valid', False)
-        alt_valid = getattr(self.vehicle_global_position, 'alt_valid', False)
+        z_valid = getattr(self.vehicle_local_position, 'z_valid', False)
+        
+        # 使用本地位置的z值作为高度
+        altitude = self.vehicle_local_position.z
         
         if not self.headless:
-            self.get_logger().info(f"GPS数据有效性: lat_lon_valid={lat_lon_valid}, alt_valid={alt_valid}")
-            self.get_logger().info(f"GPS坐标: lat={self.vehicle_global_position.lat}, lon={self.vehicle_global_position.lon}, alt={self.vehicle_global_position.alt}")
+            self.get_logger().info(f"数据有效性: lat_lon_valid={lat_lon_valid}, z_valid={z_valid}")
+            self.get_logger().info(f"GPS坐标: lat={self.vehicle_global_position.lat}, lon={self.vehicle_global_position.lon}, 高度(本地z)={altitude:.3f}m")
         
         # 准备GPS数据
         gps_data = {
             'latitude': self.vehicle_global_position.lat,
             'longitude': self.vehicle_global_position.lon,
-            'altitude': self.vehicle_global_position.alt,
+            'altitude': altitude,
             'timestamp': getattr(self.vehicle_global_position, 'timestamp', 0)
         }
         
@@ -139,6 +160,10 @@ class GpsOffboardPublisher(Node):
         """定时器的回调函数。"""
         # 检查是否接收到GPS位置数据
         if not self.gps_position_received:
+            return
+        
+        # 检查是否接收到本地位置数据
+        if not self.local_position_received:
             return
         
         # 检查是否达到发布间隔

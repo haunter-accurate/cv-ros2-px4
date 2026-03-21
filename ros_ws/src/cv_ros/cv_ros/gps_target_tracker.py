@@ -275,11 +275,6 @@ class GpsTargetTracker(Node):
         # 转换目标GPS坐标为NED坐标
         ned_x, ned_y, ned_z = self.gps_to_ned(target_lat, target_lon, target_alt, ref_lat, ref_lon, ref_alt)
         
-        # 计算水平距离
-        horizontal_distance = math.sqrt(ned_x**2 + ned_y**2)
-        # 计算垂直距离
-        vertical_distance = abs(ned_z)
-        
         # 如果控制未启用，只输出期望移动距离
         if not self.enable_control:
             if not self.headless:
@@ -290,32 +285,15 @@ class GpsTargetTracker(Node):
         # 创建TrajectorySetpoint消息
         trajectory_msg = TrajectorySetpoint()
         
-        # 设置NED目标位置
+        # 设置NED目标位置（PX4在位置控制模式下使用这些值）
         trajectory_msg.x = ned_x  # 北方向
         trajectory_msg.y = ned_y  # 东方向
         trajectory_msg.z = ned_z  # 天方向（负号表示向下）
         
-        # 计算速度向量（基于目标位置和当前位置的差值）
-        
-        # 计算速度向量
-        if horizontal_distance > 0.1:  # 避免除以零
-            # 计算水平速度分量
-            vx = ned_x / horizontal_distance * min(self.max_horizontal_velocity, horizontal_distance * 0.5)
-            vy = ned_y / horizontal_distance * min(self.max_horizontal_velocity, horizontal_distance * 0.5)
-        else:
-            vx = 0.0
-            vy = 0.0
-        
-        if vertical_distance > 0.1:  # 避免除以零
-            # 计算垂直速度分量
-            vz = ned_z / vertical_distance * min(self.max_vertical_velocity, vertical_distance * 0.5)
-        else:
-            vz = 0.0
-        
-        # 设置速度
-        trajectory_msg.vx = vx  # 北方向速度
-        trajectory_msg.vy = vy  # 东方向速度
-        trajectory_msg.vz = vz  # 天方向速度（负号表示向下）
+        # 设置速度为0（PX4在位置控制模式下会忽略这些值）
+        trajectory_msg.vx = 0.0
+        trajectory_msg.vy = 0.0
+        trajectory_msg.vz = 0.0
         
         # 设置加速度为0
         trajectory_msg.acceleration[0] = 0.0
@@ -330,9 +308,8 @@ class GpsTargetTracker(Node):
         self.trajectory_setpoint_publisher.publish(trajectory_msg)
         
         if not self.headless:
-            self.get_logger().info(f"发布目标位置: x={ned_x:.2f}, y={ned_y:.2f}, z={ned_z:.2f}")
+            self.get_logger().info(f"发布目标位置: x={ned_x:.2f}m, y={ned_y:.2f}m, z={ned_z:.2f}m")
             self.get_logger().info(f"目标GPS位置: lat={target_lat}, lon={target_lon}, alt={target_alt}")
-            self.get_logger().info(f"速度设置: vx={vx:.2f}, vy={vy:.2f}, vz={vz:.2f}")
 
     def timer_callback(self) -> None:
         """定时器的回调函数。"""
