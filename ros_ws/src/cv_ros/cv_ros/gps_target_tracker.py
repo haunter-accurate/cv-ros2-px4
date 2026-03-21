@@ -61,6 +61,7 @@ class GpsTargetTracker(Node):
         self.declare_parameter('altitude_offset', 2.0)  # 高度偏移（米）
         self.declare_parameter('max_horizontal_velocity', 1.0)  # 最大水平速度（米/秒）
         self.declare_parameter('max_vertical_velocity', 0.5)  # 最大垂直速度（米/秒）
+        self.declare_parameter('gps_filter_alpha', 0.3)  # GPS低通滤波系数（0-1，越小滤波越强）
         
         # 获取参数
         self.headless = self.get_parameter('headless').value
@@ -72,6 +73,7 @@ class GpsTargetTracker(Node):
         self.altitude_offset = self.get_parameter('altitude_offset').value
         self.max_horizontal_velocity = self.get_parameter('max_horizontal_velocity').value
         self.max_vertical_velocity = self.get_parameter('max_vertical_velocity').value
+        self.gps_filter_alpha = self.get_parameter('gps_filter_alpha').value
 
         # 初始化变量
         self.offboard_setpoint_counter = 0
@@ -88,6 +90,12 @@ class GpsTargetTracker(Node):
         self.received_gps_position = None  # 接收到的GPS坐标
         self.target_gps_position = None  # 计算出的目标GPS坐标
         self.target_ned_position = None  # 转换后的NED目标位置
+        
+        # GPS低通滤波变量
+        self.filtered_ref_lat = None  # 滤波后的本机纬度
+        self.filtered_ref_lon = None  # 滤波后的本机经度
+        self.filtered_target_lat = None  # 滤波后的目标纬度
+        self.filtered_target_lon = None  # 滤波后的目标经度
         
         # 地球半径（米）
         self.earth_radius = 6378137.0
@@ -117,6 +125,17 @@ class GpsTargetTracker(Node):
     def vehicle_global_position_callback(self, vehicle_global_position):
         """vehicle_global_position话题订阅者的回调函数。"""
         self.vehicle_global_position = vehicle_global_position
+        
+        # 应用低通滤波到本机GPS位置
+        if self.filtered_ref_lat is None:
+            # 第一次接收，直接使用当前值
+            self.filtered_ref_lat = vehicle_global_position.lat
+            self.filtered_ref_lon = vehicle_global_position.lon
+        else:
+            # 低通滤波：filtered = alpha * new + (1 - alpha) * filtered
+            self.filtered_ref_lat = self.gps_filter_alpha * vehicle_global_position.lat + (1 - self.gps_filter_alpha) * self.filtered_ref_lat
+            self.filtered_ref_lon = self.gps_filter_alpha * vehicle_global_position.lon + (1 - self.gps_filter_alpha) * self.filtered_ref_lon
+        
         if not self.vehicle_global_position_received:
             self.vehicle_global_position_received = True
             if not self.headless:
@@ -194,15 +213,26 @@ class GpsTargetTracker(Node):
                                     altitude = gps_data.get('altitude')
                                     
                                     if latitude and longitude and altitude:
-                                        # 更新接收到的GPS坐标
+                                        # 应用低通滤波到目标GPS位置
+                                        if self.filtered_target_lat is None:
+                                            # 第一次接收，直接使用当前值
+                                            self.filtered_target_lat = latitude
+                                            self.filtered_target_lon = longitude
+                                        else:
+                                            # 低通滤波：filtered = alpha * new + (1 - alpha) * filtered
+                                            self.filtered_target_lat = self.gps_filter_alpha * latitude + (1 - self.gps_filter_alpha) * self.filtered_target_lat
+                                            self.filtered_target_lon = self.gps_filter_alpha * longitude + (1 - self.gps_filter_alpha) * self.filtered_target_lon
+                                        
+                                        # 更新接收到的GPS坐标（使用滤波后的值）
                                         self.received_gps_position = {
-                                            'latitude': latitude,
-                                            'longitude': longitude,
+                                            'latitude': self.filtered_target_lat,
+                                            'longitude': self.filtered_target_lon,
                                             'altitude': altitude
                                         }
                                         
                                         if not self.headless:
-                                            self.get_logger().info(f"✓ 接收到GPS坐标: lat={latitude}, lon={longitude}, alt={altitude}")
+                                            self.get_logger().info(f"✓ 接收到GPS坐标: lat={latitude:.9f}, lon={longitude:.9f}, alt={altitude:.3f}")
+                                            self.get_logger().info(f"✓ 滤波GPS坐标: lat={self.filtered_target_lat:.9f}, lon={self.filtered_target_lon:.9f}")
                                         
                                         # 计算目标位置
                                         self.calculate_target_position()
@@ -279,12 +309,12 @@ class GpsTargetTracker(Node):
         if not self.target_gps_position:
             return
         
-        # 获取本机GPS位置作为参考
-        ref_lat = self.vehicle_global_position.lat
-        ref_lon = self.vehicle_global_position.lon
+        # 获取本机GPS位置作为参考（使用滤波后的值）
+        ref_lat = self.filtered_ref_lat if self.filtered_ref_lat is not None else self.vehicle_global_position.lat
+        ref_lon = self.filtered_ref_lon if self.filtered_ref_lon is not None else self.vehicle_global_position.lon
         ref_alt = self.vehicle_global_position.alt
         
-        # 获取目标GPS位置
+        # 获取目标GPS位置（已经是滤波后的值）
         target_lat = self.target_gps_position['latitude']
         target_lon = self.target_gps_position['longitude']
         target_alt = self.target_gps_position['altitude']

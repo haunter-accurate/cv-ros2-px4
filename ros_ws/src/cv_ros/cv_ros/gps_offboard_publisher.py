@@ -35,12 +35,14 @@ class GpsOffboardPublisher(Node):
         self.declare_parameter('offboard_wait_time', 2.0)  # 进入offboard模式后等待时间（秒）
         self.declare_parameter('socket_host', '192.168.43.175')  # Socket服务器主机
         self.declare_parameter('socket_port', 5000)  # Socket服务器端口
+        self.declare_parameter('gps_filter_alpha', 0.3)  # GPS低通滤波系数（0-1，越小滤波越强）
         
         # 获取参数
         self.headless = self.get_parameter('headless').value
         self.offboard_wait_time = self.get_parameter('offboard_wait_time').value
         self.socket_host = self.get_parameter('socket_host').value
         self.socket_port = self.get_parameter('socket_port').value
+        self.gps_filter_alpha = self.get_parameter('gps_filter_alpha').value
 
         # 初始化变量
         self.vehicle_control_mode = VehicleControlMode()
@@ -50,6 +52,10 @@ class GpsOffboardPublisher(Node):
         self.publish_interval = 5.0  # GPS坐标发布间隔（秒）
         self.gps_position_received = False  # 标记是否接收到GPS位置数据
         self.local_position_received = False  # 标记是否接收到本地位置数据
+        
+        # GPS低通滤波变量
+        self.filtered_lat = None  # 滤波后的纬度
+        self.filtered_lon = None  # 滤波后的经度
         
         # 输出初始化信息
         if not self.headless:
@@ -69,6 +75,17 @@ class GpsOffboardPublisher(Node):
     def vehicle_global_position_callback(self, vehicle_global_position):
         """vehicle_global_position话题订阅者的回调函数。"""
         self.vehicle_global_position = vehicle_global_position
+        
+        # 应用低通滤波
+        if self.filtered_lat is None:
+            # 第一次接收，直接使用当前值
+            self.filtered_lat = vehicle_global_position.lat
+            self.filtered_lon = vehicle_global_position.lon
+        else:
+            # 低通滤波：filtered = alpha * new + (1 - alpha) * filtered
+            self.filtered_lat = self.gps_filter_alpha * vehicle_global_position.lat + (1 - self.gps_filter_alpha) * self.filtered_lat
+            self.filtered_lon = self.gps_filter_alpha * vehicle_global_position.lon + (1 - self.gps_filter_alpha) * self.filtered_lon
+        
         if not self.gps_position_received:
             self.gps_position_received = True
             if not self.headless:
@@ -103,19 +120,24 @@ class GpsOffboardPublisher(Node):
         lat_lon_valid = getattr(self.vehicle_global_position, 'lat_lon_valid', False)
         z_valid = getattr(self.vehicle_local_position, 'z_valid', False)
         
-        # 经纬度使用GPS数据，高度使用本地位置（激光更可信）
+        # 经纬度使用滤波后的GPS数据，高度使用本地位置（激光更可信）
         # 本地位置z在NED坐标系中负值表示向上，取绝对值作为高度
         altitude = abs(self.vehicle_local_position.z)
         
+        # 使用滤波后的GPS坐标
+        publish_lat = self.filtered_lat if self.filtered_lat is not None else self.vehicle_global_position.lat
+        publish_lon = self.filtered_lon if self.filtered_lon is not None else self.vehicle_global_position.lon
+        
         if not self.headless:
             self.get_logger().info(f"数据有效性: lat_lon_valid={lat_lon_valid}, z_valid={z_valid}")
-            self.get_logger().info(f"GPS坐标: lat={self.vehicle_global_position.lat}, lon={self.vehicle_global_position.lon}")
+            self.get_logger().info(f"原始GPS坐标: lat={self.vehicle_global_position.lat:.9f}, lon={self.vehicle_global_position.lon:.9f}")
+            self.get_logger().info(f"滤波GPS坐标: lat={publish_lat:.9f}, lon={publish_lon:.9f}")
             self.get_logger().info(f"本地位置z: {self.vehicle_local_position.z:.3f}m, 发送高度: {altitude:.3f}m")
         
         # 准备GPS数据
         gps_data = {
-            'latitude': self.vehicle_global_position.lat,
-            'longitude': self.vehicle_global_position.lon,
+            'latitude': publish_lat,
+            'longitude': publish_lon,
             'altitude': altitude,
             'timestamp': getattr(self.vehicle_global_position, 'timestamp', 0)
         }
